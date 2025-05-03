@@ -106,7 +106,7 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [License](LICENSE) file for details.
 
 ## Citation
 
@@ -121,10 +121,11 @@ If you use this work in your research, please cite:
 }
 ```
 
-## Authors
+## Sponsorship
+This project is supported by professor Mohsen Jalaeian Farimani at the [Politecnico di Milano](https://www.polimi.it/en/) and professor Aliasghar Arab at the [NYU Tandon School of Engineering](https://engineering.nyu.edu/), and Dr. Roya Khalili Amirabadi at the [Ferdowsi University of Mashhad](https://en.um.ac.ir/). The project is part of the research activities in the field of robotics and control systems.
 
-- **Aliasghar Arab** - NYU Tandon School of Engineering
-- **Mohsen Jalaeian Farimani** - Politecnico di Milano
-- **Roya Khalili Amirabadi** - Ferdowsi University of Mashhad
+
+## Authors
+- **Mohsen Jalaeian-Farimani** - Politecnico di Milano
 - **Davoud Nikkhouy** - Politecnico di Milano
 - **Mahshad Rastegarmoghaddam** - Politecnico di Milano
