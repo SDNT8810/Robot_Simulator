@@ -33,8 +33,8 @@ This framework introduces a novel bi-level optimization approach integrated with
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/SDSNT8810/BiLVL.git
-cd BiLVL
+git clone https://github.com/SDSNT8810/Robot_Simulator.git
+cd Robot_Simulator
 ```
 
 2. Create and activate a virtual environment (recommended):
@@ -78,7 +78,7 @@ Key configuration sections in `config/config.yaml`:
 ## Project Structure
 
 ```
-BiLVL/
+Robot_Simulator/
 ├── src/
 │   ├── models/          # Robot and motor models
 │   ├── controllers/     # MPC and PID implementations
