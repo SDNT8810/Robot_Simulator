@@ -1,0 +1,209 @@
+id: 12
+# Timing Parameters
+timing:
+  time_step: 0.05  # Simulation and control time step (s)
+  total_time: 50.0  # Total simulation time (s)
+  save_frequency: 1  # Save data every N steps
+  log_frequency: 1  # Log data every N (s)
+  visualization_frequency: 0.001  # Update visualization every N steps
+
+# logging Parameters
+logging:
+  log_file: "simulation_log.txt"  # Log file name
+  log_format: "txt"  # Log format (txt, csv, json, etc.)
+  log_path: "./logs/"  # Path to save logs
+  log_data:
+    - time
+    - position
+    - velocity
+    - actuator
+    - safety_violation
+    - control_input
+  level: "INFO"  # Can be DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  loging_frequency: 2  # N Log every seconds
+
+# Visualization Parameters
+visualization:
+  view_time_window: 10.0  # Time window for plots (s)
+  plot_margin: 5  # Y-axis margin
+  position_view_radius: 1.0  # XY plot radius (m)
+  wheel_scale:
+    width: 0.1  # Wheel visualization width scale
+    length: 1  # Wheel visualization length scale
+  margins:
+    mode: "Auto_Center"  # Visualization mode (Auto_Center, Fixed)
+    fixed_center:
+      x: 0.0  # Fixed X-axis center
+      y: 0.0  # Fixed Y-axis center
+    margin: 7  # Auto center margin
+    plot: 5  # Plot margins
+
+# Initial Conditions
+initial:
+  state:
+    position: [0.0, 0.0, 0.0]  # [x, y, ψ]
+    velocity: [0.0, 0.0, 0.0]  # [vx, vy, ω]
+    actuator: [0.0, 0.0, 0.0, 0.0]  # Motor currents [I_FL, I_FR, I_RL, I_RR]
+  
+# Robot Configuration
+robot:
+  # Physical parameters (from paper)
+  mass: 2449.0  # kg
+  inertia: 815.0  # kg⋅m²
+  wheelbase: 1.8  # m (Lf, Lr)
+  track_width: 0.9  # m (Wl, Wr)
+  wheel_radius: 0.386  # m
+  
+  # Tire parameters
+  tire:
+    normal_force: 6000.0  # N per tire
+    roll_resistance: 0.015  # Rolling resistance coefficient
+    friction:
+      max: 1.0  # Maximum friction coefficient
+      B: 10.0  # Stiffness factor
+      C: 1.9  # Shape factor
+      D: 1.0  # Peak factor
+      E: 0.97  # Curvature factor
+      
+  # Motor parameters - Adjusted for better response
+  motor:
+    resistance: 0.3  # Ohms (R)
+    inductance: 0.0001  # H (L)
+    torque_constant: 0.12  # N⋅m/A (K)
+    back_emf_constant: 0.12  # V⋅s/rad
+    gear_ratio: 20.0  # Gear reduction (rg)
+    max_voltage: 12.0  # V
+    max_current: 40.0  # A
+    max_torque: 150.0  # N⋅m
+    efficiency: 0.9  # Motor efficiency
+    inertia: 0.001  # kg⋅m²
+    damping: 0.1  # N⋅m⋅s/rad
+
+  # Slip and uncertainty parameters
+  slip:
+    max_ratio: 0.1  # Maximum longitudinal slip ratio (λ_max)
+    max_angle: 0.05  # Maximum lateral slip angle (rad)
+    lambda_max: 0.15  # Maximum total slip
+    uncertainty: 0.2  # Bounded uncertainty (γ)
+
+# Safety Parameters
+safety:
+  # Distance thresholds (from paper)
+  rho_0: 1.0  # Minimum front distance (m)
+  rho_1: 2.0  # Minimum side distance (m)
+  theta_0: 1.57  # Angular threshold (rad, π/2)
+  
+  # CBF dynamics parameters
+  cbf_dynamics:
+    margin_slope: 0.5  # Safety margin increase with velocity
+    activation_sharpness: 5.0  # Smooth activation parameter
+    curvature_factor: 0.7  # Speed reduction in curves
+    velocity_factor: 0.3  # Acceleration reduction with speed
+    angular_velocity_limit: 1.0  # Maximum angular velocity (rad/s)
+    
+  # Speed and acceleration limits (from paper)
+  limits:
+    velocity:
+      base: 2.0  # Base maximum velocity (m/s)
+      slope: -0.5  # Velocity reduction per meter
+      min: 0.1  # Minimum allowed velocity (m/s)
+      max: 3.0  # Absolute maximum velocity (m/s)
+      omega_max: 1.0  # Maximum angular velocity (rad/s)
+    acceleration:
+      base: 1.0  # Base maximum acceleration (m/s²)
+      slope: -0.2  # Acceleration reduction per meter
+      min: 0.1  # Minimum allowed acceleration (m/s²)
+    nu_max:
+      base: 1.0  # Base maximum acceleration (m/s²)
+      slope: -0.2  # Acceleration reduction per meter
+      min: 0.1  # Minimum allowed acceleration (m/s²)
+      max: 2.0  # Maximum allowed acceleration (m/s²)
+
+  # Yielding behavior
+  yielding:
+    start_distance: 2.0  # Start reducing speed (m)
+    stop_distance: 1.0  # Full stop distance (m)
+    recovery_rate: 2  # Safety violation recovery rate
+    
+  # Safety monitoring
+  monitoring:
+    violation_threshold: -0.05  # CBF violation threshold
+    max_violations: 10  # Maximum consecutive violations
+    min_scale_factor: 0.1  # Minimum control scaling factor
+
+  # CBF parameter
+  alpha: 1.0  # CBF convergence rate
+
+# Controller Parameters (From Equation 12 in paper)
+controller:
+  # Control type
+  type: "PID"  # Type of controller (MPC, PID, etc.)
+  
+  # PID parameters - Adjusted for voltage-based control
+  pid:
+    Kp: [2.0, 2.0, 1.0]  # Increased proportional gains for [x, y, θ]
+    Ki: [0.2, 0.2, 0.1]  # Reduced integral gains to prevent windup
+    Kd: [0.5, 0.5, 0.2]  # Increased derivative gains for better damping
+    
+    max_output: [1.0, 1.0, 0.5]  # Maximum output for each dimension
+    min_output: [-1.0, -1.0, -0.5]  # Minimum output for each dimension
+    front_rear_scale: -0.8  # Front-rear scale factor for PID control
+  # MPC parameters
+  mpc:
+    # Prediction horizon
+    prediction_horizon: 20  # Number of steps for prediction (Hp)
+    control_horizon: 10  # Number of steps for control (Nc)
+    time_step: 0.05  # Time step for prediction (s)
+    
+    # Control weights
+    weights:
+      Q1: [1.0, 1.0, 0.5]  # Position tracking
+      Q2: [0.2, 0.2, 0.1]  # Velocity tracking
+      R: [0.1, 0.1, 0.01, 0.01, 0.01, 0.01]  # Input weights
+  
+    # Constraints
+    constraints:
+      steering:
+        min: [-0.5, -0.5]  # Minimum steering angles [front, rear] (rad)
+        max: [0.5, 0.5]   # Maximum steering angles [front, rear] (rad)
+        rate_min: [-0.1, -0.1]  # Minimum steering rates (rad/s)
+        rate_max: [0.1, 0.1]   # Maximum steering rates (rad/s)
+      voltage:
+        min: [-12.0, -12.0, -12.0, -12.0]  # Minimum motor voltages (V)
+        max: [12.0, 12.0, 12.0, 12.0]      # Maximum motor voltages (V)
+        rate_min: [-2.0, -2.0, -2.0, -2.0]  # Minimum voltage rates (V/s)
+        rate_max: [2.0, 2.0, 2.0, 2.0]      # Maximum voltage rates (V/s)
+  
+# senario
+scenario:
+  # Scenario name
+  name: "to_goal"  # "circle" or "to_goal" # Name of the scenario
+
+  circle:
+    initial_position: [3.0, 0.0, 90.0]  # Initial position [x, y]
+    radius: 3.0  # Radius of the circle (m)
+    center: [0.0, 0.0]  # Center of the circle [x, y]
+    speed: 1.0  # Speed of the robot (m/s)
+
+  to_goal:
+    # Path to goal
+    initial_position: [0.0, 0.0, 0.0]  # Initial position [x, y, theta]
+    initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
+    goal: [5.0, 5.0]  # Goal position [x, y]
+    goal_tolerance: 1.2  # Tolerance for reaching the goal (m)
+    desired_velocity: 0.5  # Reduced from 1.0 to start slower
+    
+    # Dynamic obstacles
+    dynamic_obstacles:
+      count: 0  # Number of dynamic obstacles
+      behavior: "random"  # Behavior of dynamic obstacles (random, predictable)
+
+    # Static human obstacles (from paper scenario)
+    humans:
+      positions:
+        # - [1.5, 6.28, 0.0]  # First human [x, y, ψ]
+        # - [0.0, 2.0, 0.0]   # Second human [x, y, ψ]
+      velocities:
+        # - [0.0, 0.0, 0.0]   # Static humans
+        # - [0.0, 0.0, 0.0]
