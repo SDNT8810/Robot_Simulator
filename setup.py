@@ -16,7 +16,10 @@ setup(
         'pytest>=8.0.0',  # For testing
         'cvxopt>=1.3.0',  # For QP solving
         'control>=0.9.0',  # For control system analysis
-        'casadi>=3.5.5'  # For nonlinear optimization
+        'casadi>=3.5.5',  # For nonlinear optimization
+        'pathlib',  # For platform-independent path handling
+        'argparse',  # For command-line argument parsing
+        'python-tk'  # For tkinter (used in visualization)
     ],
     python_requires='>=3.8',
     classifiers=[
