@@ -16,14 +16,10 @@ class BaseScenario:
         # Load config and get parameters
         self.config = config
         self.duration = self.config['timing']['total_time']
-        self.time = 0.0
-        self.senario_name = config['scenario']['name']
-        
-        # Initialize robot
-        self.robot = Robot4WSD(config)
+        self.scenario_name = config['scenario']['name']
         
         # Initialize scenario-specific parameters
-        if self.senario_name == 'circle':
+        if self.scenario_name == 'circle':
             self.radius = self.config['scenario']['circle']['radius']
             self.center = np.array(self.config['scenario']['circle']['center'])
             self.v_desired = self.config['scenario']['circle']['speed']
@@ -48,19 +44,17 @@ class BaseScenario:
                 self.nominal_delta_front = 0
                 self.nominal_delta_rear = 0
                 
-        elif self.senario_name == 'to_goal':
+        elif self.scenario_name == 'to_goal':
             self.goal = np.array(self.config['scenario']['to_goal']['goal'])
             self.initial_position = np.array(self.config['scenario']['to_goal']['initial_position'])
             self.goal_tolerance = self.config['scenario']['to_goal']['goal_tolerance']
             self.human_positions = np.array(self.config['scenario']['to_goal']['humans']['positions'])
             self.human_velocities = np.array(self.config['scenario']['to_goal']['humans']['velocities'])
             # Set a default desired velocity for to_goal scenario
-            self.v_desired = 1.0  # Default velocity of 1.0 m/s
 
     def get_desired_state(self, time: float) -> np.ndarray:
         """Get the desired state of the scenario including velocities."""
-        self.time = time
-        if self.senario_name == 'circle':
+        if self.scenario_name == 'circle':
             # Calculate desired state for circular motion
             # Theta represents the angle around the circle
             theta = self.omega_desired * time
@@ -79,10 +73,11 @@ class BaseScenario:
             
             return np.array([x, y, heading, vx, vy, omega])
             
-        elif self.senario_name == 'to_goal':
-            # Get position difference
-            dx = self.goal[0] - self.robot.state[0]
-            dy = self.goal[1] - self.robot.state[1]
+        elif self.scenario_name == 'to_goal':
+
+            self.v_desired = self.config['scenario']['to_goal']['desired_velocity']
+            dx = self.goal[0] - self.initial_position[0]
+            dy = self.goal[1] - self.initial_position[1]
             dist = np.sqrt(dx*dx + dy*dy)
             
             # If close to goal, stop
@@ -98,11 +93,11 @@ class BaseScenario:
             
             return np.array([self.goal[0], self.goal[1], heading, vx, vy, omega])
         else:
-            raise ValueError(f"Unknown scenario name: {self.senario_name}")
-        
+            raise ValueError(f"Unknown scenario name: {self.scenario_name}")
+                
     def get_initial_state(self) -> np.ndarray:
         """Get the initial state of the scenario including velocities."""
-        if self.senario_name == 'circle':
+        if self.scenario_name == 'circle':
             # For circle, start with the velocity needed for circular motion
             theta_0 = np.deg2rad(self.initial_position[2])  # Convert initial angle to radians
             
@@ -118,48 +113,19 @@ class BaseScenario:
                 vx_0, vy_0, omega_0
             ])
             
-        elif self.senario_name == 'to_goal':
+        elif self.scenario_name == 'to_goal':
             # Start from rest for goal-directed motion
             vx_0 = self.config['scenario']['to_goal']['initial_speed'][0]
             vy_0 = self.config['scenario']['to_goal']['initial_speed'][1]
             omega_0 = self.config['scenario']['to_goal']['initial_speed'][2]
             return np.concatenate([self.initial_position, [vx_0, vy_0, omega_0]])
         else:
-            raise ValueError(f"Unknown scenario name: {self.senario_name}")
+            raise ValueError(f"Unknown scenario name: {self.scenario_name}")
 
     def get_human_positions(self) -> np.ndarray:
         """Get the positions of humans in the scenario."""
-        if self.senario_name == 'to_goal':
+        if self.scenario_name == 'to_goal':
             return self.human_positions
         else:
             return np.array([])  # No humans in other scenarios
         
-    def get_nominal_inputs(self) -> np.ndarray:
-        """Get nominal control inputs for the scenario."""
-        if self.senario_name == 'circle':
-            # Return pre-calculated steering angles and constant wheel speeds
-            return np.array([
-                self.nominal_delta_front,  # Front steering
-                self.nominal_delta_rear,   # Rear steering
-                self.v_desired,  # All wheels at same speed for pure rolling
-                self.v_desired,
-                self.v_desired,
-                self.v_desired
-            ])
-        else:
-            return np.zeros(6)  # Default zero input for other scenarios
-
-    def is_running(self, state: np.ndarray) -> bool:
-        """Check if the scenario is still running."""
-        if self.senario_name == 'circle':
-            return self.time < self.duration
-        elif self.senario_name == 'to_goal':
-            # Check if the robot has reached the goal
-            distance_to_goal = np.linalg.norm(state[:2] - self.goal[:2])
-            # Stop if we reach the goal, continue if we haven't AND we're within time limit
-            return distance_to_goal > self.goal_tolerance and self.time < self.duration
-        else:
-            raise ValueError(f"Unknown scenario name: {self.senario_name}")
-
-
-

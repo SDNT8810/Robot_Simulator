@@ -1,15 +1,13 @@
-id: 12
 # Timing Parameters
 timing:
-  time_step: 0.05  # Simulation and control time step (s)
+  time_step: 0.01  # Simulation and control time step (s)
   total_time: 50.0  # Total simulation time (s)
-  save_frequency: 1  # Save data every N steps
-  log_frequency: 1  # Log data every N (s)
-  visualization_frequency: 0.001  # Update visualization every N steps
 
 # logging Parameters
 logging:
   log_file: "simulation_log.txt"  # Log file name
+  run_file: "runs"  # Run log file name
+  run_name: "test"  # Name of the run
   log_format: "txt"  # Log format (txt, csv, json, etc.)
   log_path: "./logs/"  # Path to save logs
   log_data:
@@ -21,10 +19,13 @@ logging:
     - control_input
   level: "INFO"  # Can be DEBUG, INFO, WARNING, ERROR, CRITICAL
   format: "%(asctime)s - %(levelname)s - %(message)s"
-  loging_frequency: 2  # N Log every seconds
+  saving_run_frequency: 10  # N Log every seconds
+  log_frequency: 1  # Log data every N (s)
+  visualization_frequency: 0.01  # Update visualization every N steps
 
 # Visualization Parameters
 visualization:
+  enabled: true  # Enable visualization
   view_time_window: 10.0  # Time window for plots (s)
   plot_margin: 5  # Y-axis margin
   position_view_radius: 1.0  # XY plot radius (m)
@@ -39,13 +40,16 @@ visualization:
     margin: 7  # Auto center margin
     plot: 5  # Plot margins
 
-# Initial Conditions
+# Simulation Conditions
 initial:
   state:
     position: [0.0, 0.0, 0.0]  # [x, y, ψ]
     velocity: [0.0, 0.0, 0.0]  # [vx, vy, ω]
     actuator: [0.0, 0.0, 0.0, 0.0]  # Motor currents [I_FL, I_FR, I_RL, I_RR]
-  
+  steering:
+    front: 0.0  # Front steering angle (rad)
+    rear: 0.0  # Rear steering angle (rad)
+
 # Robot Configuration
 robot:
   # Physical parameters (from paper)
@@ -55,6 +59,8 @@ robot:
   track_width: 0.9  # m (Wl, Wr)
   wheel_radius: 0.386  # m
   
+  model: "kinematics"  # Type of simulation (kinematics, dynamics)
+
   # Tire parameters
   tire:
     normal_force: 6000.0  # N per tire
@@ -79,6 +85,8 @@ robot:
     efficiency: 0.9  # Motor efficiency
     inertia: 0.001  # kg⋅m²
     damping: 0.1  # N⋅m⋅s/rad
+    voltage_speed_factor: 1.2  # Voltage to speed conversion factor
+    nominal_voltage: 12.0  # Nominal voltage (V)
 
   # Slip and uncertainty parameters
   slip:
@@ -107,17 +115,17 @@ safety:
     velocity:
       base: 2.0  # Base maximum velocity (m/s)
       slope: -0.5  # Velocity reduction per meter
-      min: 0.1  # Minimum allowed velocity (m/s)
+      min: 0.0  # Minimum allowed velocity (m/s)
       max: 3.0  # Absolute maximum velocity (m/s)
       omega_max: 1.0  # Maximum angular velocity (rad/s)
     acceleration:
       base: 1.0  # Base maximum acceleration (m/s²)
       slope: -0.2  # Acceleration reduction per meter
-      min: 0.1  # Minimum allowed acceleration (m/s²)
+      min: 0.0  # Minimum allowed acceleration (m/s²)
     nu_max:
       base: 1.0  # Base maximum acceleration (m/s²)
       slope: -0.2  # Acceleration reduction per meter
-      min: 0.1  # Minimum allowed acceleration (m/s²)
+      min: 0.0  # Minimum allowed acceleration (m/s²)
       max: 2.0  # Maximum allowed acceleration (m/s²)
 
   # Yielding behavior
@@ -142,19 +150,29 @@ controller:
   
   # PID parameters - Adjusted for voltage-based control
   pid:
-    Kp: [2.0, 2.0, 1.0]  # Increased proportional gains for [x, y, θ]
+    Kp: [2.0, 2.0, 0.5]  # Increased proportional gains for [x, y, θ]
     Ki: [0.2, 0.2, 0.1]  # Reduced integral gains to prevent windup
     Kd: [0.5, 0.5, 0.2]  # Increased derivative gains for better damping
     
-    max_output: [1.0, 1.0, 0.5]  # Maximum output for each dimension
-    min_output: [-1.0, -1.0, -0.5]  # Minimum output for each dimension
-    front_rear_scale: -0.8  # Front-rear scale factor for PID control
+    max_output:  12.0  # Maximum output for each dimension (increased)
+    min_output: -12.0  # Minimum output for each dimension (increased)
+    front_rear_scale: -0.5  # Front-rear scale factor for PID control
+    
+    alpha_moving_average: 0.3  # PID filter coefficient
+    int_windup_limit: 5.0  # Anti-windup limit to prevent integral term buildup
+    
+    # New parameters for enhanced controller
+    look_ahead: 2.2  # Pure pursuit look-ahead distance for steering calculation
+    blend_factor: 0.5  # Blend between PID omega and pure pursuit steering
+    speed_threshold: 0.5  # Speed threshold for dynamic rear steering behavior
+    startup_boost: 2.5  # Additional voltage boost when starting from standstill
+
   # MPC parameters
   mpc:
     # Prediction horizon
     prediction_horizon: 20  # Number of steps for prediction (Hp)
     control_horizon: 10  # Number of steps for control (Nc)
-    time_step: 0.05  # Time step for prediction (s)
+    time_step: 0.01  # Time step for prediction (s)
     
     # Control weights
     weights:
@@ -175,24 +193,24 @@ controller:
         rate_min: [-2.0, -2.0, -2.0, -2.0]  # Minimum voltage rates (V/s)
         rate_max: [2.0, 2.0, 2.0, 2.0]      # Maximum voltage rates (V/s)
   
-# senario
+# scenario
 scenario:
   # Scenario name
-  name: "to_goal"  # "circle" or "to_goal" # Name of the scenario
-
+  name: "circle"  # "circle" or "to_goal" # Name of the scenario
+  
   circle:
-    initial_position: [3.0, 0.0, 90.0]  # Initial position [x, y]
-    radius: 3.0  # Radius of the circle (m)
+    initial_position: [2.0, 0.0, 90.0]  # Initial position [x, y]
+    radius: 2.0  # Radius of the circle (m)
     center: [0.0, 0.0]  # Center of the circle [x, y]
-    speed: 1.0  # Speed of the robot (m/s)
+    speed: 1.2  # Speed of the robot (m/s)
 
   to_goal:
     # Path to goal
     initial_position: [0.0, 0.0, 0.0]  # Initial position [x, y, theta]
     initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
-    goal: [5.0, 5.0]  # Goal position [x, y]
+    goal: [15.0, -5.0]  # Goal position [x, y]
     goal_tolerance: 1.2  # Tolerance for reaching the goal (m)
-    desired_velocity: 0.5  # Reduced from 1.0 to start slower
+    desired_velocity: 3.0  # Reduced from 1.0 to start slower
     
     # Dynamic obstacles
     dynamic_obstacles:

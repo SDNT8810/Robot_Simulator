@@ -3,8 +3,8 @@
 import numpy as np
 from dataclasses import dataclass
 from src.models.robot import Robot4WSD
-from src.safety.barrier import ControlBarrierFunction 
-from src.safety.barrier import DistanceBarrier , YieldingBarrier, SpeedBarrier, AccelBarrier
+from src.safety.barrier import ControlBarrierFunction
+from src.safety.barrier import DistanceBarrier, YieldingBarrier, SpeedBarrier, AccelBarrier
 
 @dataclass
 class MPCParams:
@@ -60,7 +60,6 @@ class BiLevelMPC:
                 self.config['controller']['mpc']['constraints']['voltage']['rate_max']
             ])
         )
-        self.robot = Robot4WSD(config)
         # Initialize concrete barrier functions
         self.safety_barriers = [
             DistanceBarrier(config),

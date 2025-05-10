@@ -10,15 +10,15 @@ class RobotVisualizer:
     """Real-time visualization of the robot state."""
     
     @classmethod
-    def plot_results(cls, simulation: 'Simulation'):
+    def plot_results(cls, simulation: Simulation):
         """Plot simulation results."""
         # Get current state and inputs
-        state = simulation.state
+        state = simulation.robot.state
         x, y, theta = state[0:3]
         vx, vy, omega = state[3:6]
 
         # Get current control inputs
-        current_input = simulation.get_control_inputs().get(simulation.time, np.zeros(6))
+        current_input = simulation.input_history.get(simulation.time, np.zeros(6))
         delta_front, delta_rear = current_input[0:2]
         wheel_velocities = current_input[2:6]
         
@@ -62,7 +62,7 @@ class RobotVisualizer:
             
             # Plot start and goal positions
             start_pos = simulation.scenario.get_initial_state()[:2]
-            if simulation.scenario.senario_name == 'to_goal':
+            if simulation.scenario.scenario_name == 'to_goal':
                 goal_pos = simulation.scenario.goal[:2]
             else:  # circle scenario
                 goal_pos = simulation.scenario.center
@@ -71,7 +71,7 @@ class RobotVisualizer:
             cls.ax_robot.plot(goal_pos[0], goal_pos[1], 'r*', markersize=15, label='Target', zorder=5)
             
             # Create desired circle path if applicable
-            if simulation.scenario.senario_name == 'circle':
+            if simulation.scenario.scenario_name == 'circle':
                 radius = simulation.scenario.radius
                 center = simulation.scenario.center
                 t = np.linspace(0, 2*np.pi, 100)

@@ -25,7 +25,7 @@ from src.simulation.simulator import Simulation
 from src.simulation.scenarios import BaseScenario
 from src.models.robot import Robot4WSD
 from src.utils.config import Load_Config
-from src.visualization.visualizer import RobotVisualizer as Visualizer
+from src.utils.visualizer import RobotVisualizer as Visualizer
 import argparse
 
 # load config
@@ -85,15 +85,8 @@ def setup_logging(config):
     
     return log_file
 
-def run_simulation(args) -> int:
-    """Run the robot simulation with given arguments.
-    
-    Args:
-        args: Parsed command line arguments
-        
-    Returns:
-        0 on success, 1 on error
-    """
+def setup_simulation(args) -> Simulation:
+    """Setup simulation environment based on configuration."""
     try:
         # Load base config
         config_path = project_root / 'config' / args.config
@@ -114,39 +107,74 @@ def run_simulation(args) -> int:
 
         # Initialize simulation
         logger.info("Initializing simulation...")
-        scenario = BaseScenario(config)
-        sim = Simulation(scenario)
+        sim = Simulation(config)
         
+    except Exception as e:
+        logger.error(f"Error setting up simulation: {str(e)}")
+
+    return sim
+
+
+
+def run_simulation(sim: Simulation) -> int:
+    """Run the robot simulation with given arguments.
+    
+    Args:
+        sim: Simulation object
+        
+    Returns:
+        0 on success, 1 on error
+    """
+    try:
         # Run simulation loop
         logger.info("Starting simulation loop...")
+        config = sim.config
+
+        run_dir = Path('runs')
+        run_dir.mkdir(exist_ok=True)
+        
+        # Create run-specific directory and file
+        run_name = config['logging']['run_name']
+        run_file = run_dir / f"run_{run_name}.csv"
+                
         while sim.step():
             if sim.time % sim.log_dt < sim.dt:  # Log every second
-                action = sim.controller.action(sim.state, sim.desired_state)
-                
-                # Prepare simulation data for logging
-                sim_data = {
-                    'time': sim.time,
-                    'position': list(sim.state[0:3]),
-                    'velocity': list(sim.state[3:6]),
-                    'actuator': list(sim.action),
-                    'control_input': list(action),
-                    'safety_violation': False  # Add safety violation status if available
-                }
+                action = sim.controller.action(sim.robot.state, sim.desired_state)
                 
                 # Log simulation data
                 logger.info(f"T: {sim.time:.1f}, C: δ_f={action[0]:.2f}, δ_r={action[1]:.2f}, "
                           f"V=[{action[2]:.1f}, {action[3]:.1f}, {action[4]:.1f}, {action[5]:.1f}]")
-                logger.info(f"Sim Data: {sim_data}")
                 
-            if sim.time % config['timing']['visualization_frequency'] < sim.dt:
+            if sim.time % 1/sim.save_run_dt < sim.dt:  # Log every second
+                action = sim.controller.action(sim.robot.state, sim.desired_state)
+                
+                # Prepare simulation data for logging
+                sim_data = {
+                    'time': sim.time,
+                    'position': list(sim.robot.state[0:3]),
+                    'velocity': list(sim.robot.state[3:6]),
+                    'actuator': list(action[0:2]),
+                    'wheele_speed': list(action[2:6]),
+                }
+
+                # Save simulation data to CSV
+                with open(run_file, 'a', newline='') as csvfile:
+                    fieldnames = ['time', 'position', 'velocity', 'actuator', 'wheele_speed']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    if os.stat(run_file).st_size == 0:  # Write header if file is empty
+                        writer.writeheader()
+                    writer.writerow(sim_data)
+                
+            if (sim.time % config['logging']['visualization_frequency'] < sim.dt) and config['visualization']['enabled']:
                 Visualizer.plot_results(sim)
                 plt.pause(0.001)
-        
+
         logger.info("Simulation complete")
         
         # Save final figure
-        plt.savefig('simulation_result.png', bbox_inches='tight', dpi=300)
-        logger.info("Saved final figure as simulation_result.png")
+        if config['visualization']['enabled']:
+            plt.savefig('simulation_result.png', bbox_inches='tight', dpi=300)
+            logger.info("Saved final figure as simulation_result.png")
         
         return 0
         
