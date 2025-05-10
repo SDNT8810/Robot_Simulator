@@ -45,3 +45,8 @@ figures/
 *.png
 *.jpg
 *.pdf
+*.csv
+*.json
+*.xlsx
+*.xls
+*.txt

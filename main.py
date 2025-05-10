@@ -9,7 +9,8 @@ def main() -> int:
                        metavar=('parameter', 'value'),
                        help='Override config parameters: --param parameter value')
     args = parser.parse_args()
-    return run_simulation(args)
+    sim = setup_simulation(args)
+    return run_simulation(sim)
 
 if __name__ == "__main__":
     sys.exit(main())

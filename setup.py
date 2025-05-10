@@ -19,7 +19,6 @@ setup(
         'casadi>=3.5.5',  # For nonlinear optimization
         'pathlib',  # For platform-independent path handling
         'argparse',  # For command-line argument parsing
-        'python-tk'  # For tkinter (used in visualization)
     ],
     python_requires='>=3.8',
     classifiers=[
