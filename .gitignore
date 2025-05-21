@@ -39,6 +39,7 @@ env/
 # Project specific
 data/
 logs/
+runs/
 *.log
 results/
 figures/

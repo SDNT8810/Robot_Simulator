@@ -94,16 +94,23 @@ Key configuration sections in `config/config.yaml`:
 
 ```
 Robot_Simulator/
-├── src/
-│   ├── models/          # Robot and motor models
+├── config/              # Configuration files
+├── docs/                # Documentation
+├── logs/                # Log files
+├── runs/                # Simulation run outputs
+├── src/                 # Source code
 │   ├── controllers/     # MPC and PID implementations
-│   ├── safety/         # Control Barrier Functions
-│   ├── simulation/     # Simulation environment
-│   ├── visualization/  # Real-time plotting
-│   └── utils/         # Helper functions
-├── config/            # Configuration files
-├── docs/             # Documentation
-└── examples/         # Usage examples
+│   ├── models/          # Robot and motor models
+│   ├── safety/          # Control Barrier Functions
+│   ├── simulation/      # Simulation environment
+│   └── utils/           # Helper functions and visualization
+├── tools/               # Additional tools and scripts
+├── LICENSE              # License file
+├── main.py              # Entry point for the simulation
+├── README.md            # Project documentation
+├── requirements.txt     # Python dependencies
+├── setup.py             # Installation script
+└── simulation_result.png # Example simulation result
 ```
 
 ## Development Roadmap
@@ -141,6 +148,6 @@ This project is supported by professor Mohsen Jalaeian Farimani at the [Politecn
 
 
 ## Authors
-- **Mohsen Jalaeian-Farimani** - Politecnico di Milano
 - **Davoud Nikkhouy** - Politecnico di Milano
+- **Mohsen Jalaeian-Farimani** - Politecnico di Milano
 - **Mahshad Rastegarmoghaddam** - Politecnico di Milano
