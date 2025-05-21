@@ -1,6 +1,6 @@
 timing:
   time_step: 0.02  # Simulation and control time step (s)
-  total_time: 20.5  # Total simulation time (s)
+  total_time: 10.5  # Total simulation time (s)
 visualization:
   enabled: true  # Enable visualization
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
@@ -27,7 +27,7 @@ scenario:
   circle:
     initial_position: [0.0, 0.0, 30.0]  # Initial position [x, y, theta]
     radius: 4.0  # Radius of the circle (m)
-    speed: 2.91   # Further increased target speed for more agility testing
+    speed: 2.99   # Further increased target speed for more agility testing
   to_goal:
     # Path to goal
     initial_position: [0.0, -3.0, 0.0]  # Initial position [x, y, theta]
