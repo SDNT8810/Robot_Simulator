@@ -1,0 +1,36 @@
+timing:
+  time_step: 0.02  # Simulation and control time step (s)
+  total_time: 20.5  # Total simulation time (s)
+visualization:
+  enabled: true  # Enable visualization
+  plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
+    - State: false  # Robot Velocity State plot
+    - Velocity: true  # Speed and Angular Velocity plot
+    - Error: true  # Error plot
+    - SafetyViolation: false  # Safety violation plot
+    - ControlInput: true  # Control input plot
+
+robot:
+  model: "dynamics"  # Type of simulation (kinematics, dynamics)
+controller:
+  mode: "PID"  
+  type: "PID"  # Use the FastMPC, BiLVLMPC, SimplifiedMPC, PID controller
+  mpc:
+    # Prediction horizon
+    prediction_horizon: 20  # Increased from 15 for longer planning
+    control_horizon: 5  # Increased from 1 for smoother control
+    time_step: 0.1  # Reduced from 0.2 for more precise control
+  
+scenario:
+  # Scenario name
+  name: "circle"  # "circle" or "to_goal" # Name of the scenario
+  circle:
+    initial_position: [0.0, 0.0, 30.0]  # Initial position [x, y, theta]
+    radius: 4.0  # Radius of the circle (m)
+    speed: 2.91   # Further increased target speed for more agility testing
+  to_goal:
+    # Path to goal
+    initial_position: [0.0, -3.0, 0.0]  # Initial position [x, y, theta]
+    initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
+    goal: [0.0, 7.0]  # Goal position [x, y]
+    desired_velocity: 1.0  # Reduced from 1.0 to start slower

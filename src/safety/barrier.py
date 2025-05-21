@@ -1,9 +1,53 @@
 """Control Barrier Functions for robot safety."""
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Dict, Optional, Tuple
+import casadi as ca
+from typing import Dict, Optional, Tuple, Union
 # from src.models.input import RobotInput
 from src.utils.config import Load_Config
+
+# Helper function to support both numpy and casadi operations
+def is_symbolic(x):
+    """Check if value is a CasADi symbolic variable."""
+    return hasattr(x, 'is_symbolic') and x.is_symbolic()
+
+def safe_sqrt(x):
+    """Square root that works with both numpy and CasADi."""
+    if isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int):
+        return np.sqrt(x)
+    else:  # CasADi MX
+        return ca.sqrt(x)
+        
+def safe_abs(x):
+    """Absolute value that works with both numpy and CasADi."""
+    if isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int):
+        return abs(x)
+    else:  # CasADi MX
+        return ca.fabs(x)
+        
+def safe_min(a, b):
+    """Minimum that works with both numpy and CasADi."""
+    if (isinstance(a, np.ndarray) or isinstance(a, float) or isinstance(a, int)) and \
+       (isinstance(b, np.ndarray) or isinstance(b, float) or isinstance(b, int)):
+        return min(a, b)
+    else:  # CasADi MX
+        return ca.fmin(a, b)
+        
+def safe_max(a, b):
+    """Maximum that works with both numpy and CasADi."""
+    if (isinstance(a, np.ndarray) or isinstance(a, float) or isinstance(a, int)) and \
+       (isinstance(b, np.ndarray) or isinstance(b, float) or isinstance(b, int)):
+        return max(a, b)
+    else:  # CasADi MX
+        return ca.fmax(a, b)
+        
+def safe_arctan2(y, x):
+    """Arctan2 that works with both numpy and CasADi."""
+    if (isinstance(y, np.ndarray) or isinstance(y, float) or isinstance(y, int)) and \
+       (isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int)):
+        return np.arctan2(y, x)
+    else:  # CasADi MX
+        return ca.atan2(y, x)
 
 class ControlBarrierFunction(ABC):
     """Base class for Control Barrier Functions (CBFs).
@@ -135,20 +179,39 @@ class DistanceBarrier(ControlBarrierFunction):
         self.margin_slope = config['safety']['cbf_dynamics']['margin_slope']
         
     def _get_dynamic_safety_distance(self, base_distance: float) -> float:
-        """Compute velocity-dependent safety distance.
+        """Compute velocity-dependent safety distance with enhanced margins.
         
-        The safety distance increases with robot speed to account for
-        longer stopping distances and reaction times at higher velocities.
+        The safety distance increases with robot speed and accounts for:
+        1. Linear speed-dependent margin
+        2. Quadratic term for higher speeds
+        3. Angular velocity consideration for turning
         
         Args:
             base_distance: Base safety distance (rho_0 or rho_1)
             
         Returns:
-            Adjusted safety distance
+            Adjusted safety distance with enhanced margins
         """
+        # Calculate speed and angular velocity
         v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        dynamic_margin = self.margin_slope * v
-        return base_distance + dynamic_margin
+        omega = abs(self.state.omega)
+        
+        # Linear speed term
+        speed_term = self.margin_slope * v
+        
+        # Quadratic term for higher speeds (more aggressive increase)
+        quadratic_term = 0.1 * (v ** 2)
+        
+        # Angular velocity term (wider turns need more space)
+        turning_term = 0.5 * omega * v  # Scale with both angular and linear velocity
+        
+        # Combine all terms with base distance
+        dynamic_margin = speed_term + quadratic_term + turning_term
+        
+        # Add a small minimum margin even when stationary
+        min_margin = 0.2  # meters
+        
+        return base_distance + max(dynamic_margin, min_margin)
         
     def h(self, human_state: Dict[str, float]) -> float:
         """Evaluate distance-based CBF with dynamic safety margins.
@@ -166,17 +229,40 @@ class DistanceBarrier(ControlBarrierFunction):
         rho = np.sqrt(dx**2 + dy**2)
         theta = np.arctan2(dy, dx) - self.state.theta
         
-        # Choose threshold based on angle
-        base_distance = self.rho_0 if abs(theta) < self.theta_0 else self.rho_1
+        # Choose threshold based on angle - use safe_abs to handle symbolic variables
+        base_distance = self.rho_0 if safe_abs(theta) < self.theta_0 else self.rho_1
+        
+        # Add extra margin based on relative velocity
+        v_robot = np.array([self.state.vx, self.state.vy])
+        v_human = np.array([human_state.get('vx', 0), human_state.get('vy', 0)])
+        v_rel = v_robot - v_human
+        
+        # Project relative velocity onto the line between robot and human
+        if rho > 1e-6:  # Avoid division by zero
+            r_unit = np.array([dx, dy]) / rho
+            v_approach = np.dot(v_rel, r_unit)
+            
+            # Add extra margin based on approach velocity (positive when getting closer)
+            if v_approach > 0:
+                # Time to collision estimate (clamped to reasonable values)
+                ttc = rho / (v_approach + 1e-6)
+                ttc_factor = 1.0 + 2.0 * np.exp(-0.5 * ttc)  # More aggressive as TTC decreases
+                base_distance *= ttc_factor
+        
         rho_min = self._get_dynamic_safety_distance(base_distance)
         
-        return rho - rho_min
+        # Add extra safety margin based on robot's current speed
+        v = np.linalg.norm([self.state.vx, self.state.vy])
+        speed_margin = 0.3 * v  # Additional margin proportional to speed
+        
+        return rho - (rho_min + speed_margin)
         
     def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate time derivative of distance CBF.
+        """Evaluate time derivative of distance CBF with enhanced responsiveness.
         
-                        ḣ_dist = d/dt(ρ) = (v_r · r_unit)
-        where v_r is relative velocity, r_unit is unit vector from robot to human
+        ḣ_dist = d/dt(ρ) = (v_r · r_unit) - d/dt(ρ_min)
+        where v_r is relative velocity, r_unit is unit vector from robot to human,
+        and ρ_min is the dynamic safety distance
         """
         # Get relative position and velocity
         dx = human_state['x'] - self.state.x
@@ -186,11 +272,33 @@ class DistanceBarrier(ControlBarrierFunction):
         
         # Calculate distance and unit vector
         rho = np.sqrt(dx**2 + dy**2)
+        if rho < 1e-6:  # Avoid division by zero
+            return 0.0
+            
         rx = dx / rho  # Unit vector x
         ry = dy / rho  # Unit vector y
         
-        # Project relative velocity onto unit vector
-        return dvx * rx + dvy * ry
+        # Project relative velocity onto unit vector (rate of change of distance)
+        rho_dot = dvx * rx + dvy * ry
+        
+        # Calculate rate of change of the safety margin
+        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
+        if v > 0.1:  # Only apply when moving
+            # Rate of change of speed (approximate)
+            ax = self.state.get_motor_current(0) * self.state.torque_constant / self.state.mass
+            ay = self.state.get_motor_current(1) * self.state.torque_constant / self.state.mass
+            v_dot = (self.state.vx * ax + self.state.vy * ay) / v
+            
+            # Rate of change of angular velocity (simplified)
+            omega_dot = 0.0  # Could be estimated from steering inputs
+            
+            # Rate of change of dynamic margin
+            margin_dot = (self.margin_slope + 0.2 * v) * v_dot + 0.5 * self.state.omega * omega_dot
+        else:
+            margin_dot = 0.0
+        
+        # Combine terms (negative sign because we want to maintain rho > rho_min)
+        return rho_dot - margin_dot
 
 class YieldingBarrier(ControlBarrierFunction):
     """Yielding behavior CBF for giving right of way to humans."""
@@ -322,7 +430,7 @@ class SpeedBarrier(ControlBarrierFunction):
         v_max = min(self.nu_max, self.nu_base)
         
         # Smoother speed reduction based on angular velocity
-        omega_normalized = abs(self.state.omega) / self.angular_velocity_limit
+        omega_normalized = safe_abs(self.state.omega) / self.angular_velocity_limit
         omega_factor = max(0.3, 1.0 - 0.3 * omega_normalized)  # Less aggressive reduction
         
         # Apply curvature factor with smoother transition
@@ -402,9 +510,9 @@ class AccelBarrier(ControlBarrierFunction):
         velocity_reduction = 1.0 / (1.0 + 0.5 * self.velocity_factor * v)
         
         # More permissive slip handling
-        slip_ratio = min(abs(self.state.vx / (self.state.omega * self.state.wheel_radius + 1e-6)), 
+        slip_ratio = safe_min(safe_abs(self.state.vx / (self.state.omega * self.state.wheel_radius + 1e-6)), 
                         self.slip_threshold)
-        slip_factor = max(0.5, 1.0 - (slip_ratio / self.slip_threshold))
+        slip_factor = safe_max(0.5, 1.0 - (slip_ratio / self.slip_threshold))
         
         # Reduced uncertainty margin for more permissive acceleration
         uncertainty_margin = 0.5 * self.get_uncertainty_margin(self.state)
