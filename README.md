@@ -1,21 +1,30 @@
-# Bi-Level Safe Control Framework
+# 2D Robot Simulation Environment
 
-A hierarchical optimization framework for controlling robotic vehicles with explicit safety guarantees, particularly designed for active front and rear wheel steering vehicles operating in human-centric environments.
+A modular and expandable framework for simulating robotic vehicles in a 2D environment. The framework supports various controllers and robot models, making it ideal for testing and development in robotics research and education.
 
 ## Description
 
-This framework introduces a novel bi-level optimization approach integrated with Nonlinear Model Predictive Control (NMPC) to address the critical trade-off between performance and safety. Instead of treating safety as a penalty term in the cost function, which can lead to suboptimal performance, the framework decomposes the control problem into two interdependent levels:
+This framework provides a 2D simulation environment with built-in support for PID and MPC controllers, as well as kinematic and dynamic solvers. It is designed to be modular and easily extendable, allowing users to:
 
-1. **Upper Level**: Uses MPC to minimize a cost function focused on trajectory tracking accuracy and actuation efficiency
-2. **Lower Level**: Explicitly maximizes safety through Control Barrier Functions (CBFs)
+1. Add new robot models with different kinematic and dynamic properties.
+2. Implement and test additional controller types.
+3. Create and evaluate custom simulation scenarios.
 
 ### Key Features
 
-- **Comprehensive Safety Framework**: 
-  - Distance-based safety with dynamic thresholds
-  - Yielding behavior in human proximity
-  - Adaptive speed and acceleration limits
-  - Real-time CBF constraint enforcement
+- **Modular Design**:
+  - Easily integrate new robot models.
+  - Add custom controllers.
+  - Define and test new scenarios.
+
+- **Controller Support**:
+  - PID controller for simple and effective control.
+  - MPC controller for advanced trajectory optimization.
+
+- **Simulation Capabilities**:
+  - Kinematic and dynamic solvers for accurate robot behavior.
+  - Configurable simulation parameters.
+  - Real-time visualization of robot motion and control outputs.
 
 - **Advanced Robot Control**:
   - 4-wheel steering and drive (4WSD) support
@@ -28,6 +37,13 @@ This framework introduces a novel bi-level optimization approach integrated with
   - Modular controller design (MPC/PID)
   - Real-time visualization
   - Extensive parameter tuning options
+
+## Prerequisites
+
+Before installing, ensure you have the following installed:
+- Python 3.8 or higher
+- pip (Python package manager)
+- Virtual environment tools (optional but recommended)
 
 ## Installation
 
@@ -71,8 +87,7 @@ python main.py --param scenario.name to_goal --param controller.type PID
 
 Key configuration sections in `config/config.yaml`:
 - `robot`: Physical parameters and motor specifications
-- `safety`: CBF parameters and safety thresholds
-- `controller`: MPC/PID parameters and constraints
+- `controller`: PID/MPC parameters and constraints
 - `scenario`: Test scenarios and environment setup
 
 ## Project Structure
@@ -94,7 +109,7 @@ Robot_Simulator/
 ## Development Roadmap
 
 Current focus areas:
-1. Dynamic safety parameter implementation
+1. Modular robot model integration
 2. Computational efficiency improvements
 3. Testing framework expansion
 
