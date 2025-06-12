@@ -1,4 +1,4 @@
-# BiLVL Project Code Index
+# Robot Simulator Project Code Index
 
 ## Core Components
 

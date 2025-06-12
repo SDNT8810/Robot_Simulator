@@ -9,6 +9,11 @@ from src.controllers.simplified_mpc import SimplifiedMPC
 from src.controllers.fast_mpc import FastMPC
 from src.controllers.pid import PID
 from src.models.robot import Robot4WSD
+from src.safety.barrier import extract_safety_data
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Simulation:
     """Basic simulation class."""
@@ -27,7 +32,6 @@ class Simulation:
         self.duration = self.scenario.duration
         self.config = config
         self.action = np.concatenate([[0, 0], [0, 0, 0, 0]])
-        self.safety_barrier = None
 
         # Initialize controller based on config
         if config['controller']['type'] == 'PID':
@@ -43,14 +47,47 @@ class Simulation:
                 
         # Store history for visualization
         self.input_history = {}  # Store control inputs
+        self.sim_data = {
+            'robot_state': self.robot.state.copy(),
+            'desired_state': self.desired_state.copy(),
+            'time': self.time,
+            'safety_data': {}
+        }
+        self.safety_data = {}
+
         
     def step(self) -> bool:
         """Perform one simulation step."""
         self.time += self.dt
         
         self.desired_state = self.planner.get_desired_state(self.robot.state, self.scenario, self.time)
-        action = self.controller.action(self.robot.state, self.desired_state)
-        
+        # Extract and add safety constraint data
+        # Prepare basic simulation data for logging with flat structure
+        self.sim_data = {
+            'time': self.time,
+            # Position components (flat structure for CSV)
+            'pos_x': self.robot.state[0],
+            'pos_y': self.robot.state[1], 
+            'pos_z': self.robot.state[2],
+            # Velocity components (flat structure for CSV)
+            'vel_x': self.robot.state[3],
+            'vel_y': self.robot.state[4],
+            'vel_z': self.robot.state[5]
+        }
+        self.safety_data = extract_safety_data(self)
+        self.sim_data.update(self.safety_data)
+
+        action = self.controller.action(self.robot.state, self.desired_state, self.safety_data)
+
+        # Actuator inputs (flat structure for CSV)
+        self.sim_data['actuator_front'] = action[0]
+        self.sim_data['actuator_rear'] = action[1]
+        # Wheel speeds (flat structure for CSV)
+        self.sim_data['wheel_speed_fl'] = action[2]  # front left
+        self.sim_data['wheel_speed_fr'] = action[3]  # front right
+        self.sim_data['wheel_speed_rl'] = action[4]  # rear left
+        self.sim_data['wheel_speed_rr'] = action[5]  # rear right
+
         # Store control inputs for visualization
         self.input_history[self.time] = action.copy()
 

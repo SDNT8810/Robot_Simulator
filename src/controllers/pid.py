@@ -6,6 +6,8 @@ as input and produces steering angles and motor voltages as output.
 
 import numpy as np
 from dataclasses import dataclass
+from typing import Dict, Any
+from src.safety.barrier import DistanceBarrier, YieldingBarrier, SpeedBarrier, AccelBarrier
 
 @dataclass
 class PIDParams:
@@ -56,14 +58,22 @@ class PID:
         self.prev_voltages = np.zeros(4)  # Previous voltage values
         self.prev_steering = np.zeros(2)  # Previous steering angles [front, rear]
         self.steering_deadband = 0.03  # Steering deadband in radians (about 1.7 degrees)
-
-    def action(self, state: np.ndarray, desired_state: np.ndarray) -> np.ndarray:
-        """Calculate control actions based on current and desired states.
+        # Initialize concrete barrier functions
+        self.safety_barriers = [
+            DistanceBarrier(config),
+            YieldingBarrier(config),
+            SpeedBarrier(config),
+            AccelBarrier(config)
+        ]
+    def action(self, state: np.ndarray, desired_state: np.ndarray, safety_data: Dict[str, Any]) -> np.ndarray:
+        """Compute control action using PID.
         
         Args:
             state: Current robot state [x, y, θ, vx, vy, omega]
             desired_state: Desired robot state [x, y, θ, vx, vy, omega]
-                
+            safety_data: Safety-related data for the current simulation step
+
+                  
         Returns:
             Control action [δ_front, δ_rear, V_FL, V_FR, V_RL, V_RR]
             where δ are steering angles in radians and V are motor voltages.

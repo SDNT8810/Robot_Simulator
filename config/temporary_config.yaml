@@ -4,16 +4,16 @@ timing:
 visualization:
   enabled: true  # Enable visualization
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
-    - State: false  # Robot Velocity State plot
+    - State: true  # Robot Velocity State plot
     - Velocity: true  # Speed and Angular Velocity plot
     - Error: true  # Error plot
-    - SafetyViolation: false  # Safety violation plot
+    - SafetyViolation: true  # Safety violation plot
     - ControlInput: true  # Control input plot
 
 robot:
   model: "dynamics"  # Type of simulation (kinematics, dynamics)
 controller:
-  mode: "PID"  
+  mode: "MCP"  
   type: "PID"  # Use the FastMPC, BiLVLMPC, SimplifiedMPC, PID controller
   mpc:
     # Prediction horizon
@@ -23,7 +23,7 @@ controller:
   
 scenario:
   # Scenario name
-  name: "circle"  # "circle" or "to_goal" # Name of the scenario
+  name: "to_goal"  # "circle" or "to_goal" # Name of the scenario
   circle:
     initial_position: [0.0, 0.0, 30.0]  # Initial position [x, y, theta]
     radius: 4.0  # Radius of the circle (m)

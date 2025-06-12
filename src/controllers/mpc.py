@@ -6,10 +6,13 @@ using a gradient-based optimization approach instead of CasADi.
 
 import numpy as np
 import time
+import logging
 from dataclasses import dataclass
+from typing import Dict, Any
 from src.models.robot import Robot4WSD
-from src.controllers.pid import PID
 from src.safety.barrier import DistanceBarrier, YieldingBarrier, SpeedBarrier, AccelBarrier
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,13 +95,14 @@ class BiLevelMPC:
         self.cost_history = []
         self.patience_counter = 0
         
-    def action(self, state: np.ndarray, desired_state: np.ndarray) -> np.ndarray:
+    def action(self, state: np.ndarray, desired_state: np.ndarray, safety_data: Dict[str, Any]) -> np.ndarray:
         """Compute control action using MPC.
         
         Args:
             state: Current robot state [x, y, θ, vx, vy, omega]
             desired_state: Desired robot state [x, y, θ, vx, vy, omega]
-                
+            safety_data: Safety-related data for the current simulation step
+ 
         Returns:
             Control action [δ_front, δ_rear, V_FL, V_FR, V_RL, V_RR]
             where δ are steering angles in radians and V are motor voltages.
@@ -106,7 +110,7 @@ class BiLevelMPC:
         try:
             # Ensure state arrays have consistent sizes
             if len(state.shape) != 1 or state.shape[0] < 6:
-                print(f"Warning: Invalid state shape {state.shape}, padding with zeros")
+                logger.debug(f"Warning: Invalid state shape {state.shape}, padding with zeros")
                 # Pad with zeros if needed
                 full_state = np.zeros(6)
                 full_state[:min(6, state.shape[0])] = state[:min(6, state.shape[0])]
@@ -114,11 +118,11 @@ class BiLevelMPC:
                 
             # Ensure desired_state has correct dimensions
             if len(desired_state.shape) != 1:
-                print(f"Warning: Invalid desired_state shape {desired_state.shape}, flattening")
+                logger.debug(f"Warning: Invalid desired_state shape {desired_state.shape}, flattening")
                 desired_state = desired_state.flatten()
                 
             if desired_state.shape[0] < 6:
-                print(f"Warning: Desired state too short {desired_state.shape}, padding")
+                logger.debug(f"Warning: Desired state too short {desired_state.shape}, padding")
                 # Pad with zeros if needed
                 full_desired_state = np.zeros(6)
                 full_desired_state[:desired_state.shape[0]] = desired_state
@@ -130,7 +134,7 @@ class BiLevelMPC:
             return u_opt
             
         except Exception as e:
-            print(f"Error in MPC controller: {e}")
+            logger.debug(f"Error in MPC controller: {e}")
             # Fallback to last known good control or zero
             return self.last_u.copy() if self.last_u is not None else np.zeros(6)
         
@@ -206,14 +210,16 @@ class BiLevelMPC:
             })
         
         # Add human obstacles from the configuration
-        if self.config['scenario']['name'] == 'to_goal' and 'humans' in self.config['scenario']['to_goal']:
-            human_positions = self.config['scenario']['to_goal']['humans']['positions']
-            human_velocities = self.config['scenario']['to_goal']['humans']['velocities']
+        scenario_name = self.config['scenario']['name']
+        scenario_config = self.config['scenario'].get(scenario_name, {})
+        if 'humans' in scenario_config:
+            human_positions = scenario_config['humans']['positions']
+            human_velocities = scenario_config['humans']['velocities']
             
             # Loop through all defined human obstacles
             for i, (pos, vel) in enumerate(zip(human_positions, human_velocities)):
-                # Debug output to verify obstacle loading
-                print(f"Loading human obstacle {i}: pos={pos}, vel={vel}")
+                # debug output to verify obstacle loading
+                logger.debug(f"Loading human obstacle {i}: pos={pos}, vel={vel}")
                 
                 human_states.append({
                     'x': float(pos[0]),
@@ -301,7 +307,7 @@ class BiLevelMPC:
             
             # If line search failed to improve cost, add some exploration noise
             if not search_success and iteration > 0:
-                print("Adding exploration noise...")
+                logger.debug("Adding exploration noise...")
                 noise = np.random.normal(0, 0.05, size=n_u)
                 u_trial = u_current + noise
                 u_trial = np.clip(u_trial, u_min, u_max)
@@ -334,7 +340,7 @@ class BiLevelMPC:
             # Adaptive learning rate adjustment
             if self.patience_counter >= self.adaptive_lr_patience:
                 learning_rate = max(self.adaptive_lr_min, learning_rate * self.adaptive_lr_factor)
-                print(f"Adaptive learning rate adjusted to {learning_rate:.4f}")
+                logger.debug(f"Adaptive learning rate adjusted to {learning_rate:.4f}")
                 self.patience_counter = 0
             
             # Update control for next iteration
@@ -345,7 +351,7 @@ class BiLevelMPC:
         
         # Record optimization stats
         optimization_time = time.time() - start_time
-        print(f"BiLevelMPC: {iteration} iterations in {optimization_time*1000:.1f}ms, cost={best_cost:.4f}, |∇|={gradient_norm:.4f}")
+        logger.debug(f"BiLevelMPC: {iteration} iterations in {optimization_time*1000:.1f}ms, cost={best_cost:.4f}, |∇|={gradient_norm:.4f}")
         
         # Update last control and solution
         self.last_u = best_u.copy()
@@ -563,7 +569,7 @@ class BiLevelMPC:
             gradient[i] = (forward_cost - backward_cost) / (2 * epsilon)
         
         # Print gradient information for debugging
-        print(f"Gradient: mag={np.linalg.norm(gradient):.4f}, values={np.round(gradient, 4)}")
+        logger.debug(f"Gradient: mag={np.linalg.norm(gradient):.4f}, values={np.round(gradient, 4)}")
         
         return gradient
     
@@ -644,7 +650,7 @@ class BiLevelMPC:
             
             # Implement avoidance action when too close to obstacle
             if distance < min_safe_distance * 1.2:  # Additional margin
-                print(f"Safety constraint active: distance={distance:.2f}m, human at ({closest_human['x']:.1f}, {closest_human['y']:.1f})")
+                logger.debug(f"Safety constraint active: distance={distance:.2f}m, human at ({closest_human['x']:.1f}, {closest_human['y']:.1f})")
                 
                 # Calculate steering adjustment to avoid obstacle
                 # If obstacle is in front, steer away from it

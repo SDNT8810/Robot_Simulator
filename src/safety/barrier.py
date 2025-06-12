@@ -1,579 +1,404 @@
-"""Control Barrier Functions for robot safety."""
-from abc import ABC, abstractmethod
+"""Control Barrier Functions for robot safety.
+
+Implementation based on the Bi-Level Performance-Safety Consideration paper.
+CBFs are defined according to equations (7), (8), (9), (10) and condition (11).
+
+Implementation Summary:
+
+1. DistanceBarrier - Equation (7): Maintains safe distance with different thresholds
+   for front (ρ_0=2.0m) and side (ρ_1=1.0m) regions
+
+2. YieldingBarrier - Equation (8): Enforces yielding behavior when approaching humans
+   Returns approach rate (dρ/dt) in yielding zones
+
+3. SpeedBarrier - Equation (9): Limits speed based on distance to humans
+   Uses ν_M(ρ_hi) = V_M · tanh(ρ_hi) for speed limits
+
+4. AccelBarrier - Equation (10): Constrains acceleration near humans
+   Uses distance-dependent acceleration limits
+
+All CBFs implement the condition: C_ji = ḣ_ji + α·h²_ji ≥ 0 (Equation 11)
+"""
 import numpy as np
-import casadi as ca
-from typing import Dict, Optional, Tuple, Union
-# from src.models.input import RobotInput
-from src.utils.config import Load_Config
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+import logging
 
-# Helper function to support both numpy and casadi operations
-def is_symbolic(x):
-    """Check if value is a CasADi symbolic variable."""
-    return hasattr(x, 'is_symbolic') and x.is_symbolic()
+logger = logging.getLogger(__name__)
 
-def safe_sqrt(x):
-    """Square root that works with both numpy and CasADi."""
-    if isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int):
-        return np.sqrt(x)
-    else:  # CasADi MX
-        return ca.sqrt(x)
-        
-def safe_abs(x):
-    """Absolute value that works with both numpy and CasADi."""
-    if isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int):
-        return abs(x)
-    else:  # CasADi MX
-        return ca.fabs(x)
-        
-def safe_min(a, b):
-    """Minimum that works with both numpy and CasADi."""
-    if (isinstance(a, np.ndarray) or isinstance(a, float) or isinstance(a, int)) and \
-       (isinstance(b, np.ndarray) or isinstance(b, float) or isinstance(b, int)):
-        return min(a, b)
-    else:  # CasADi MX
-        return ca.fmin(a, b)
-        
-def safe_max(a, b):
-    """Maximum that works with both numpy and CasADi."""
-    if (isinstance(a, np.ndarray) or isinstance(a, float) or isinstance(a, int)) and \
-       (isinstance(b, np.ndarray) or isinstance(b, float) or isinstance(b, int)):
-        return max(a, b)
-    else:  # CasADi MX
-        return ca.fmax(a, b)
-        
-def safe_arctan2(y, x):
-    """Arctan2 that works with both numpy and CasADi."""
-    if (isinstance(y, np.ndarray) or isinstance(y, float) or isinstance(y, int)) and \
-       (isinstance(x, np.ndarray) or isinstance(x, float) or isinstance(x, int)):
-        return np.arctan2(y, x)
-    else:  # CasADi MX
-        return ca.atan2(y, x)
 
 class ControlBarrierFunction(ABC):
-    """Base class for Control Barrier Functions (CBFs).
+    """Base class for all Control Barrier Functions."""
     
-    Each CBF h(x) defines a safety constraint h(x) ≥ 0. The time derivative
-                      ḣ(x,u) must satisfy ḣ(x,u) + αh(x) ≥ 0 for some α > 0 to ensure safety.
-    """
+    def __init__(self, alpha: float = 1.0):
+        """Initialize CBF with class-K function parameter."""
+        self.alpha = alpha
+        self.robot_state: Optional[Dict[str, float]] = None
     
-    def __init__(self, config: Load_Config):
-        """Initialize CBF parameters from config."""
-        self.alpha = config['safety']['alpha']  # CBF parameter
-        self.uncertainty_bound = config['robot']['slip']['uncertainty']  # Uncertainty bound
+    def set_robot_state(self, state: Dict[str, float]):
+        """Set current robot state."""
+        self.robot_state = state
     
-        self.input_ = None  # Placeholder for robot input
-        self.human_state = None  # Placeholder for human state
-        self.config = config  # Store config for later use
-        self.state = type('State', (object,), {})()
-        self.state.x = 0.0
-        self.state.y = 0.0
-        self.state.theta = 0.0
-        self.state.vx = 0.0
-        self.state.vy = 0.0
-        self.state.omega = 0.0
-        self.state.i_fl = 0.0
-        self.state.i_fr = 0.0
-        self.state.i_rl = 0.0
-        self.state.i_rr = 0.0 
-        
-    def get_adaptive_alpha(self) -> float:
-        """Get adaptive CBF parameter based on robot state.
-        
-        The α parameter increases with robot speed to provide stronger
-        safety guarantees at higher velocities.
-        
-        Args:
-            state: Current robot state
-            
-        Returns:
-            Adaptive α value
-        """
-        
-        # self.x, self.y, self.theta = state_vector[0:3]
-        # self.vx, self.vy, self.omega = state_vector[3:6]
-        # self.i_fl, self.i_fr, self.i_rl, self.i_rr = state_vector[6:10]
-
-
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        return self.alpha * (1.0 + 0.5 * v)  # Base value plus velocity-dependent term
-        
-    def get_uncertainty_margin(self) -> float:
-        """Calculate safety margin to account for model uncertainty.
-        
-        Args:
-            state: Current robot state
-            
-        Returns:
-            Additional safety margin based on uncertainty
-        """
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        return self.uncertainty_bound * v  # Uncertainty increases with speed
-        
-    def compute_robust_barrier(self, h_nominal: float, 
-                             uncertainty_margin: float) -> float:
-        """Compute robust barrier value accounting for uncertainty.
-        
-        Args:
-            h_nominal: Nominal barrier function value
-            uncertainty_margin: Safety margin for uncertainty
-            
-        Returns:
-            Robust barrier value
-        """
-        return h_nominal - uncertainty_margin
-
+    def set_robot_input(self, input_dict: Dict[str, float]):
+        """Set current robot input (for compatibility)."""
+        pass
+    
+    def get_adaptive_alpha(self, robot_state: Dict[str, float]) -> float:
+        """Get adaptive alpha parameter."""
+        return self.alpha
+    
     @abstractmethod
     def h(self, human_state: Dict[str, float]) -> float:
-        """Evaluate the CBF h(x).
-        
-        Args:
-            human_state: Dictionary with human state info (position, velocity)
-        
-        Returns:
-            Value of h(x). Positive values indicate safety.
-        """
+        """Evaluate barrier function h(x)."""
         pass
-        
+    
     @abstractmethod
     def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate the time derivative ḣ(x,u).
-        
-        Args:
-            human_state: Dictionary with human state info
-            
-        Returns:
-            Value of ḣ(x,u)
-        """
+        """Evaluate time derivative ḣ(x)."""
         pass
-        
-    def verify_safety(self, human_state: Dict[str, float]) -> bool:
-        """Check if the CBF condition is satisfied.
-        
-        Args:
-            human_state: Dictionary with human state info
-            
-        Returns:
-            True if ḣ(x,u) + αh(x) ≥ 0
-        """
+    
+    def constraint_condition(self, human_state: Dict[str, float]) -> float:
+        """Evaluate CBF condition: C = ḣ + α·h²."""
         h_val = self.h(human_state)
-        uncertainty_margin = self.get_uncertainty_margin()
-        h_robust = self.compute_robust_barrier(h_val, uncertainty_margin)
-        
         h_dot_val = self.h_dot(human_state)
-        alpha = self.get_adaptive_alpha()
-        
-        return h_dot_val + alpha * h_robust >= 0
+        return h_dot_val + self.alpha * (h_val ** 2)
+
 
 class DistanceBarrier(ControlBarrierFunction):
-    """Distance-based CBF for maintaining safe separation from humans."""
+    """Distance CBF - Equation (7): Maintains safe distance with different thresholds."""
     
-    def __init__(self, config: Load_Config):
-        """Initialize distance CBF parameters."""
-        super().__init__(config)
-        # Base safety distances
-        self.rho_0 = config['safety']['rho_0']
-        self.rho_1 = config['safety']['rho_1']
-        self.theta_0 = config['safety']['theta_0']
-        
-        # Dynamic safety margin parameters
-        self.margin_slope = config['safety']['cbf_dynamics']['margin_slope']
-        
-    def _get_dynamic_safety_distance(self, base_distance: float) -> float:
-        """Compute velocity-dependent safety distance with enhanced margins.
-        
-        The safety distance increases with robot speed and accounts for:
-        1. Linear speed-dependent margin
-        2. Quadratic term for higher speeds
-        3. Angular velocity consideration for turning
+    def __init__(self, config=None, alpha: float = 1.0, rho_0: float = 2.0, rho_1: float = 1.0, theta_0: float = np.pi/4):
+        """
+        Initialize Distance CBF.
         
         Args:
-            base_distance: Base safety distance (rho_0 or rho_1)
-            
-        Returns:
-            Adjusted safety distance with enhanced margins
+            config: Configuration dictionary (optional)
+            alpha: CBF parameter
+            rho_0: Safety threshold for front region (m)
+            rho_1: Safety threshold for side region (m)
+            theta_0: Critical angular range (rad)
         """
-        # Calculate speed and angular velocity
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        omega = abs(self.state.omega)
+        # If config is provided, extract parameters from it
+        if config is not None and isinstance(config, dict):
+            safety_config = config.get('safety', {})
+            alpha = safety_config.get('cbf_dynamics', {}).get('alpha', 1.0)
+            rho_0 = safety_config.get('rho_0', 2.0)
+            rho_1 = safety_config.get('rho_1', 1.0) 
+            theta_0 = safety_config.get('theta_0', np.pi/4)
         
-        # Linear speed term
-        speed_term = self.margin_slope * v
-        
-        # Quadratic term for higher speeds (more aggressive increase)
-        quadratic_term = 0.1 * (v ** 2)
-        
-        # Angular velocity term (wider turns need more space)
-        turning_term = 0.5 * omega * v  # Scale with both angular and linear velocity
-        
-        # Combine all terms with base distance
-        dynamic_margin = speed_term + quadratic_term + turning_term
-        
-        # Add a small minimum margin even when stationary
-        min_margin = 0.2  # meters
-        
-        return base_distance + max(dynamic_margin, min_margin)
-        
+        super().__init__(alpha)
+        self.rho_0 = rho_0
+        self.rho_1 = rho_1
+        self.theta_0 = theta_0
+    
     def h(self, human_state: Dict[str, float]) -> float:
-        """Evaluate distance-based CBF with dynamic safety margins.
-        
-        h_dist = ρ - ρ_dyn if |θ| < θ_0 (in front)
-               = ρ - ρ_dyn if |θ| ≥ θ_0 (to side)
-        where ρ is distance to human, θ is relative angle,
-        and ρ_dyn is the velocity-dependent safety distance
-        """
-        # Get relative position
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        
-        # Calculate distance and angle
-        rho = np.sqrt(dx**2 + dy**2)
-        theta = np.arctan2(dy, dx) - self.state.theta
-        
-        # Choose threshold based on angle - use safe_abs to handle symbolic variables
-        base_distance = self.rho_0 if safe_abs(theta) < self.theta_0 else self.rho_1
-        
-        # Add extra margin based on relative velocity
-        v_robot = np.array([self.state.vx, self.state.vy])
-        v_human = np.array([human_state.get('vx', 0), human_state.get('vy', 0)])
-        v_rel = v_robot - v_human
-        
-        # Project relative velocity onto the line between robot and human
-        if rho > 1e-6:  # Avoid division by zero
-            r_unit = np.array([dx, dy]) / rho
-            v_approach = np.dot(v_rel, r_unit)
-            
-            # Add extra margin based on approach velocity (positive when getting closer)
-            if v_approach > 0:
-                # Time to collision estimate (clamped to reasonable values)
-                ttc = rho / (v_approach + 1e-6)
-                ttc_factor = 1.0 + 2.0 * np.exp(-0.5 * ttc)  # More aggressive as TTC decreases
-                base_distance *= ttc_factor
-        
-        rho_min = self._get_dynamic_safety_distance(base_distance)
-        
-        # Add extra safety margin based on robot's current speed
-        v = np.linalg.norm([self.state.vx, self.state.vy])
-        speed_margin = 0.3 * v  # Additional margin proportional to speed
-        
-        return rho - (rho_min + speed_margin)
-        
-    def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate time derivative of distance CBF with enhanced responsiveness.
-        
-        ḣ_dist = d/dt(ρ) = (v_r · r_unit) - d/dt(ρ_min)
-        where v_r is relative velocity, r_unit is unit vector from robot to human,
-        and ρ_min is the dynamic safety distance
-        """
-        # Get relative position and velocity
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        dvx = human_state.get('vx', 0) - self.state.vx
-        dvy = human_state.get('vy', 0) - self.state.vy
-        
-        # Calculate distance and unit vector
-        rho = np.sqrt(dx**2 + dy**2)
-        if rho < 1e-6:  # Avoid division by zero
+        """Evaluate distance barrier function - Equation (7)."""
+        if self.robot_state is None:
             return 0.0
-            
-        rx = dx / rho  # Unit vector x
-        ry = dy / rho  # Unit vector y
         
-        # Project relative velocity onto unit vector (rate of change of distance)
-        rho_dot = dvx * rx + dvy * ry
+        # Calculate distance to human
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        rho_hi = np.sqrt(dx**2 + dy**2)
         
-        # Calculate rate of change of the safety margin
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        if v > 0.1:  # Only apply when moving
-            # Rate of change of speed (approximate)
-            ax = self.state.get_motor_current(0) * self.state.torque_constant / self.state.mass
-            ay = self.state.get_motor_current(1) * self.state.torque_constant / self.state.mass
-            v_dot = (self.state.vx * ax + self.state.vy * ay) / v
-            
-            # Rate of change of angular velocity (simplified)
-            omega_dot = 0.0  # Could be estimated from steering inputs
-            
-            # Rate of change of dynamic margin
-            margin_dot = (self.margin_slope + 0.2 * v) * v_dot + 0.5 * self.state.omega * omega_dot
-        else:
-            margin_dot = 0.0
+        # Calculate angular deviation
+        robot_heading = self.robot_state['theta']
+        angle_to_human = np.arctan2(dy, dx)
+        theta_hi = abs(angle_to_human - robot_heading)
+        theta_hi = min(theta_hi, 2*np.pi - theta_hi)  # Normalize to [0, π]
         
-        # Combine terms (negative sign because we want to maintain rho > rho_min)
-        return rho_dot - margin_dot
+        # Apply Equation (7)
+        if abs(theta_hi) < self.theta_0:  # Front region
+            return rho_hi - self.rho_0
+        else:  # Side region
+            return rho_hi - self.rho_1
+    
+    def h_dot(self, human_state: Dict[str, float]) -> float:
+        """Evaluate time derivative of distance barrier."""
+        if self.robot_state is None:
+            return 0.0
+        
+        # Calculate relative position and velocity
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        dvx = human_state.get('vx', 0.0) - self.robot_state.get('vx', 0.0)
+        dvy = human_state.get('vy', 0.0) - self.robot_state.get('vy', 0.0)
+        
+        rho_hi = np.sqrt(dx**2 + dy**2)
+        if rho_hi < 1e-6:
+            return 0.0
+        
+        # Rate of change of distance
+        return (dx * dvx + dy * dvy) / rho_hi
+
 
 class YieldingBarrier(ControlBarrierFunction):
-    """Yielding behavior CBF for giving right of way to humans."""
+    """Yielding CBF - Equation (8): Enforces yielding behavior when approaching humans."""
     
-    def __init__(self, config: Load_Config):
-        """Initialize yielding CBF parameters."""
-        super().__init__(config)
-        # Load speed parameters
-        self.nu_base = config['safety']['limits']['nu_max']['base']
-        self.nu_slope = config['safety']['limits']['nu_max']['slope']
-        self.nu_min = config['safety']['limits']['nu_max']['min']
-        self.nu_max = config['safety']['limits']['nu_max']['max']
-        
-        
-        # Load distance thresholds
-        self.rho_0 = config['safety']['rho_0']
-        self.rho_1 = config['safety']['rho_1']
-        self.theta_0 = config['safety']['theta_0']
-        
-        # Load yielding zone parameters
-        self.yield_start = config['safety']['yielding']['start_distance']
-        self.yield_stop = config['safety']['yielding']['stop_distance']
-        
-        # Load smooth activation parameters
-        self.activation_sharpness = config['safety']['cbf_dynamics']['activation_sharpness']
-        
-    def _smooth_activation(self, x: float, x0: float, width: float = 1.0) -> float:
-        """Compute smooth activation function using sigmoid.
+    def __init__(self, config=None, alpha: float = 1.0, rho_0: float = 2.0, rho_1: float = 1.0, theta_0: float = np.pi/4):
+        """
+        Initialize Yielding CBF.
         
         Args:
-            x: Input value
-            x0: Activation threshold
-            width: Transition width
-            
-        Returns:
-            Smooth activation value in [0,1]
+            config: Configuration dictionary (optional)
+            alpha: CBF parameter
+            rho_0: Front region threshold (m)
+            rho_1: Side region threshold (m)
+            theta_0: Critical angular range (rad)
         """
-        return 1.0 / (1.0 + np.exp(-self.activation_sharpness * (x - x0) / width))
+        # If config is provided, extract parameters from it
+        if config is not None and isinstance(config, dict):
+            safety_config = config.get('safety', {})
+            alpha = safety_config.get('cbf_dynamics', {}).get('alpha', 1.0)
+            rho_0 = safety_config.get('rho_0', 2.0)
+            rho_1 = safety_config.get('rho_1', 1.0)
+            theta_0 = safety_config.get('theta_0', np.pi/4)
         
-    def _compute_max_speed(self, rho: float, v_approach: float) -> float:
-        """Compute maximum allowed speed based on distance and approach velocity.
-        
-        Args:
-            rho: Distance to human [m]
-            v_approach: Approach velocity (negative when getting closer) [m/s]
-            
-        Returns:
-            Maximum allowed speed [m/s]
-        """
-        # Base speed limit from linear interpolation
-        progress = (rho - self.yield_stop) / (self.yield_start - self.yield_stop)
-        progress = max(0.0, min(1.0, progress))
-        v_max_base = self.nu_min + progress * (self.nu_base - self.nu_min)
-        
-        # Additional reduction based on approach velocity
-        approach_factor = self._smooth_activation(-v_approach, 0.5, 1.0)
-        v_max = v_max_base * approach_factor
-        
-        return max(self.nu_min, v_max)
-        
+        super().__init__(alpha)
+        self.rho_0 = rho_0
+        self.rho_1 = rho_1
+        self.theta_0 = theta_0
+    
     def h(self, human_state: Dict[str, float]) -> float:
-        """Evaluate yielding CBF with smooth activation.
+        """Evaluate yielding barrier function - Equation (8)."""
+        if self.robot_state is None:
+            return 0.0
         
-        h_yield = ν_max(ρ,v_approach) - v
-        where v is robot speed, ν_max is maximum allowed speed,
-        which depends on both distance and approach velocity
-        """
-        # Calculate distance and approach velocity
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        rho = np.sqrt(dx**2 + dy**2)
+        # Calculate distance and angular deviation
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        rho_hi = np.sqrt(dx**2 + dy**2)
         
-        dvx = human_state.get('vx', 0) - self.state.vx
-        dvy = human_state.get('vy', 0) - self.state.vy
-        v_approach = -(dx * dvx + dy * dvy) / rho  # Negative when getting closer
+        robot_heading = self.robot_state['theta']
+        angle_to_human = np.arctan2(dy, dx)
+        theta_hi = abs(angle_to_human - robot_heading)
+        theta_hi = min(theta_hi, 2*np.pi - theta_hi)
         
-        # Calculate robot speed
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
+        # Check if in yielding zone
+        in_front_yield_zone = (rho_hi <= self.rho_0 and abs(theta_hi) < self.theta_0)
+        in_side_yield_zone = (rho_hi <= self.rho_1 and abs(theta_hi) >= self.theta_0)
         
-        # Compute maximum allowed speed with smooth activation
-        v_max = self._compute_max_speed(rho, v_approach)
-        
-        # Add uncertainty margin for robustness
-        uncertainty_margin = self.get_uncertainty_margin(self.state)
-        v_max = max(self.nu_min, v_max - uncertainty_margin)
-        
-        return v_max - v
-
+        if in_front_yield_zone or in_side_yield_zone:
+            # Calculate approach rate (dρ/dt)
+            dvx = human_state.get('vx', 0.0) - self.robot_state.get('vx', 0.0)
+            dvy = human_state.get('vy', 0.0) - self.robot_state.get('vy', 0.0)
+            
+            if rho_hi < 1e-6:
+                return 0.0
+            
+            drho_dt = (dx * dvx + dy * dvy) / rho_hi
+            return drho_dt  # Should be non-negative (not approaching)
+        else:
+            return 1.0  # Not in yielding zone, always safe
+    
     def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate time derivative of yielding CBF.
-        
-                    ḣ_yield = d/dt(ν_max(ρ)) - d/dt(v)
-        """
-        # Calculate distance and its rate of change
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        rho = np.sqrt(dx**2 + dy**2)
-        
-        dvx = human_state.get('vx', 0) - self.state.vx
-        dvy = human_state.get('vy', 0) - self.state.vy
-        rho_dot = (dx * dvx + dy * dvy) / rho
-        
-        # Calculate speed and acceleration
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        a = (self.state.vx * dvx + self.state.vy * dvy) / v if v > 0 else 0
-        
-        # Return CBF derivative
-        return self.nu_slope * rho_dot - a
+        """Evaluate time derivative of yielding barrier."""
+        # For yielding barrier, h_dot represents acceleration effects
+        return 0.0  # Simplified implementation
+
 
 class SpeedBarrier(ControlBarrierFunction):
-    """Speed limit CBF for maintaining safe velocities."""
+    """Speed CBF - Equation (9): Limits speed based on distance to humans."""
     
-    def __init__(self, config: Load_Config):
-        """Initialize speed CBF parameters."""
-        super().__init__(config)
-        # Base speed limits from safety parameters
-        self.nu_max = config['safety']['limits']['nu_max']['max']
-        self.nu_min = config['safety']['limits']['nu_max']['min']
-        self.nu_base = config['safety']['limits']['nu_max']['base']
-        self.nu_slope = config['safety']['limits']['nu_max']['slope']
-        
-        # Dynamic speed limit parameters
-        self.curvature_factor = config['safety']['cbf_dynamics']['curvature_factor']
-        self.angular_velocity_limit = config['safety']['cbf_dynamics']['angular_velocity_limit']
-        
-    def _get_dynamic_speed_limit(self) -> float:
-        """Compute dynamic speed limit based on robot state."""
-        # Start with base speed limit
-        v_max = min(self.nu_max, self.nu_base)
-        
-        # Smoother speed reduction based on angular velocity
-        omega_normalized = safe_abs(self.state.omega) / self.angular_velocity_limit
-        omega_factor = max(0.3, 1.0 - 0.3 * omega_normalized)  # Less aggressive reduction
-        
-        # Apply curvature factor with smoother transition
-        v_max = v_max * (self.curvature_factor + (1.0 - self.curvature_factor) * omega_factor)
-        
-        # Minimum guaranteed speed
-        v_max = max(0.1, v_max)  # Always allow some minimal motion
-        
-        return v_max
-    
-    def h(self, human_state: Dict[str, float]) -> float:
-        """Evaluate speed CBF with dynamic limits.
-        
-        h_speed = v_max_dyn^2 - v^2
-        Barrier activates (h < 0) when speed exceeds limit
+    def __init__(self, config=None, alpha: float = 1.0, V_M: float = 2.0):
         """
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        v_max = self._get_dynamic_speed_limit()
-        
-        # CBF value becomes negative when speed exceeds limit
-        # Changed order to make barrier more permissive
-        return v_max**2 - v**2
-    
-    def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate time derivative of speed CBF."""
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        if v < 1e-6:  # Avoid division by zero
-            return 0.0
-            
-        # Compute acceleration from motor inputs
-        ax = self.state.get_motor_current(0) * self.state.torque_constant / self.state.mass
-        ay = self.state.get_motor_current(1) * self.state.torque_constant / self.state.mass
-        
-        # Account for dynamic speed limit changes
-        v_max = self._get_dynamic_speed_limit()
-        v_max_dot = -0.3 * v_max * self.state.omega / self.angular_velocity_limit  # Reduced sensitivity
-        
-        # Project accelerations onto velocity direction
-        v_dot = (self.state.vx * ax + self.state.vy * ay) / v
-        
-        # Changed order to match h(x) definition
-        return 2 * v_max * v_max_dot - 2 * v * v_dot
-
-class AccelBarrier(ControlBarrierFunction):
-    """Acceleration limit CBF for smooth motion."""
-    
-    def __init__(self, config: Load_Config):
-        """Initialize acceleration CBF parameters."""
-        super().__init__(config)
-        self.a_base = config['safety']['limits']['acceleration']['base']
-        self.a_slope = config['safety']['limits']['acceleration']['slope']
-        self.a_min = config['safety']['limits']['acceleration']['min']
-        
-        # Dynamic acceleration parameters
-        self.velocity_factor = config['safety']['cbf_dynamics']['velocity_factor']
-        self.slip_threshold = config['robot']['slip']['lambda_max']
-        
-    def _compute_max_accel(self, rho: float) -> float:
-        """Compute maximum allowed acceleration based on distance and state.
-        
-        The acceleration limit adapts based on:
-        1. Distance to human (base behavior)
-        2. Current velocity (reduced at higher speeds)
-        3. Estimated slip conditions
+        Initialize Speed CBF.
         
         Args:
-            rho: Distance to human [m]
-            
-        Returns:
-            Maximum allowed acceleration [m/s²]
+            config: Configuration dictionary (optional)
+            alpha: CBF parameter
+            V_M: Robot's absolute maximum speed (m/s)
         """
-        # Base acceleration from distance with less reduction
-        a_max_base = max(self.a_base + self.a_slope * rho, self.a_min)
+        # If config is provided, extract parameters from it
+        if config is not None and isinstance(config, dict):
+            safety_config = config.get('safety', {})
+            alpha = safety_config.get('cbf_dynamics', {}).get('alpha', 1.0)
+            V_M = safety_config.get('limits', {}).get('velocity', {}).get('max', 2.0)
         
-        # Gentler velocity-based reduction
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        velocity_reduction = 1.0 / (1.0 + 0.5 * self.velocity_factor * v)
-        
-        # More permissive slip handling
-        slip_ratio = safe_min(safe_abs(self.state.vx / (self.state.omega * self.state.wheel_radius + 1e-6)), 
-                        self.slip_threshold)
-        slip_factor = safe_max(0.5, 1.0 - (slip_ratio / self.slip_threshold))
-        
-        # Reduced uncertainty margin for more permissive acceleration
-        uncertainty_margin = 0.5 * self.get_uncertainty_margin(self.state)
-        a_max = a_max_base * velocity_reduction * slip_factor
-        return max(self.a_min, a_max - uncertainty_margin)
-        
+        super().__init__(alpha)
+        self.V_M = V_M
+    
     def h(self, human_state: Dict[str, float]) -> float:
-        """Evaluate acceleration CBF with dynamic limits.
+        """Evaluate speed barrier function - Equation (9)."""
+        if self.robot_state is None:
+            return 0.0
         
-        h_accel = a^2 - a_max(ρ,v,λ)^2
-        where a_max depends on distance ρ, velocity v, and slip ratio λ
-        """
         # Calculate distance to human
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        rho = np.sqrt(dx**2 + dy**2)
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        rho_hi = np.sqrt(dx**2 + dy**2)
         
-        # Get current acceleration
-        ax = self.state.get_motor_current(0) * self.state.torque_constant / self.state.mass
-        ay = self.state.get_motor_current(1) * self.state.torque_constant / self.state.mass
-        a = np.sqrt(ax**2 + ay**2)
+        # Calculate maximum permissible speed
+        nu_M = self.V_M * np.tanh(rho_hi)
         
-        # Compute maximum allowed acceleration
-        a_max = self._compute_max_accel(rho)
+        # Current robot speed
+        vx = self.robot_state.get('vx', 0.0)
+        vy = self.robot_state.get('vy', 0.0)
+        v_magnitude = np.sqrt(vx**2 + vy**2)
         
-        return a**2 - a_max**2
-        
+        # h_s,i = ν_M(ρ_hi) - |v|
+        return nu_M - v_magnitude
+    
     def h_dot(self, human_state: Dict[str, float]) -> float:
-        """Evaluate time derivative of acceleration CBF.
+        """Evaluate time derivative of speed barrier."""
+        if self.robot_state is None:
+            return 0.0
         
-        ḣ_accel = 2a_max·d/dt(a_max) - 2a·j
-        where j is jerk vector, accounting for dynamics
+        # Calculate distance and its derivative
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        rho_hi = np.sqrt(dx**2 + dy**2)
+        
+        if rho_hi < 1e-6:
+            return 0.0
+        
+        # Rate of change of distance
+        dvx = human_state.get('vx', 0.0) - self.robot_state.get('vx', 0.0)
+        dvy = human_state.get('vy', 0.0) - self.robot_state.get('vy', 0.0)
+        drho_dt = (dx * dvx + dy * dvy) / rho_hi
+        
+        # Derivative of maximum speed limit
+        dnu_M_dt = self.V_M * (1 - np.tanh(rho_hi)**2) * drho_dt
+        
+        # Derivative of current speed magnitude (simplified)
+        return dnu_M_dt  # Neglecting robot acceleration for simplicity
+
+
+class AccelBarrier(ControlBarrierFunction):
+    """Acceleration CBF - Equation (10): Constrains acceleration near humans."""
+    
+    def __init__(self, config=None, alpha: float = 1.0, a_max_base: float = 1.0):
         """
-        # Calculate distance and its rate of change
-        dx = human_state['x'] - self.state.x
-        dy = human_state['y'] - self.state.y
-        rho = np.sqrt(dx**2 + dy**2)
+        Initialize Acceleration CBF.
         
-        dvx = human_state.get('vx', 0) - self.state.vx
-        dvy = human_state.get('vy', 0) - self.state.vy
-        rho_dot = (dx * dvx + dy * dvy) / rho
+        Args:
+            config: Configuration dictionary (optional)
+            alpha: CBF parameter
+            a_max_base: Base maximum acceleration (m/s²)
+        """
+        # If config is provided, extract parameters from it
+        if config is not None and isinstance(config, dict):
+            safety_config = config.get('safety', {})
+            alpha = safety_config.get('cbf_dynamics', {}).get('alpha', 1.0)
+            a_max_base = safety_config.get('limits', {}).get('acceleration', {}).get('base', 1.0)
         
-        # Current acceleration and jerk
-        ax = self.state.get_motor_current(0) * self.state.torque_constant / self.state.mass
-        ay = self.state.get_motor_current(1) * self.state.torque_constant / self.state.mass
-        a = np.sqrt(ax**2 + ay**2)
+        super().__init__(alpha)
+        self.a_max_base = a_max_base
+    
+    def h(self, human_state: Dict[str, float]) -> float:
+        """Evaluate acceleration barrier function - Equation (10)."""
+        if self.robot_state is None:
+            return 0.0
         
-        # Compute jerk including electrical dynamics
-        jx = (self.input_.get_motor_voltage(0) - self.state.get_motor_current(0) * self.state.resistance) \
-             / (self.state.inductance * self.state.mass)
-        jy = (self.input_.get_motor_voltage(1) - self.state.get_motor_current(1) * self.state.resistance) \
-             / (self.state.inductance * self.state.mass)
+        # Calculate distance to human
+        dx = human_state['x'] - self.robot_state['x']
+        dy = human_state['y'] - self.robot_state['y']
+        rho_hi = np.sqrt(dx**2 + dy**2)
         
-        # Rate of change of maximum acceleration
-        a_max = self._compute_max_accel(rho)
-        v = np.sqrt(self.state.vx**2 + self.state.vy**2)
-        v_dot = (self.state.vx * ax + self.state.vy * ay) / v if v > 0 else 0
+        # Distance-dependent maximum acceleration
+        a_max_rho = self.a_max_base * np.tanh(rho_hi)
         
-        # Account for all dynamic effects in a_max derivative
-        a_max_dot = (self.a_slope * rho_dot  # Distance effect
-                    - a_max * self.velocity_factor * v_dot  # Velocity effect
-                    - a_max * self.slip_threshold * self.state.omega_dot)  # Slip effect
+        # Current acceleration magnitude (simplified estimation)
+        ax = self.robot_state.get('ax', 0.0)
+        ay = self.robot_state.get('ay', 0.0)
+        a_magnitude = np.sqrt(ax**2 + ay**2)
         
-        return 2 * a_max * a_max_dot - 2 * (ax * jx + ay * jy)
+        # h_a,i = a_max(ρ_hi) - d|v|/dt
+        return a_max_rho - a_magnitude
+    
+    def h_dot(self, human_state: Dict[str, float]) -> float:
+        """Evaluate time derivative of acceleration barrier."""
+        # Simplified implementation
+        return 0.0
+
+
+def extract_safety_data(sim) -> Dict[str, Any]:
+    """Extract safety constraint data from simulation."""
+    safety_data: Dict[str, Any] = {
+        'num_humans': 0
+    }
+    
+    try:
+        controller = sim.controller
+        state = sim.robot.state
+        
+        if not hasattr(controller, 'safety_barriers'):
+            return safety_data
+        
+        robot_state = {
+            'x': float(state[0]), 'y': float(state[1]), 'theta': float(state[2]),
+            'vx': float(state[3]), 'vy': float(state[4]), 'omega': float(state[5])
+        }
+        
+        # Extract human states
+        human_states = []
+        if hasattr(sim.scenario, 'config') and sim.scenario.config:
+            scenario_config = sim.scenario.config.get('scenario', {}).get(sim.scenario.scenario_name, {})
+            if 'humans' in scenario_config:
+                positions = scenario_config['humans'].get('positions', [])
+                velocities = scenario_config['humans'].get('velocities', [])
+                for pos, vel in zip(positions, velocities):
+                    human_states.append({
+                        'x': float(pos[0]), 'y': float(pos[1]),
+                        'vx': float(vel[0]), 'vy': float(vel[1])
+                    })
+        
+        safety_data['num_humans'] = len(human_states)
+        
+        # Get all 4 barriers
+        barrier_names = ['distance', 'yielding', 'speed', 'accel']
+        barriers = {}
+        for i, barrier in enumerate(controller.safety_barriers):
+            if i < len(barrier_names):
+                barriers[barrier_names[i]] = barrier
+                barrier.set_robot_state(robot_state)
+        
+        # Initialize aggregated safety fields for backward compatibility
+        for barrier_name in barrier_names:
+            safety_data[f'h_{barrier_name}'] = 0.0
+            safety_data[f'h_dot_{barrier_name}'] = 0.0
+            safety_data[f'cbf_{barrier_name}'] = 0.0
+            safety_data[f'violation_{barrier_name}'] = False
+            safety_data[f'alpha_{barrier_name}'] = 1.0
+        
+        # Calculate all 4 barriers for each human individually
+        min_values = {name: float('inf') for name in barrier_names}
+        max_violations = {name: False for name in barrier_names}
+        
+        for human_idx, human_state in enumerate(human_states):
+            for barrier_name in barrier_names:
+                if barrier_name in barriers:
+                    barrier = barriers[barrier_name]
+                    
+                    h_val = barrier.h(human_state)
+                    h_dot_val = barrier.h_dot(human_state)
+                    cbf_val = barrier.constraint_condition(human_state)
+                    alpha_val = barrier.get_adaptive_alpha(robot_state)
+                    
+                    # Create flat field names for CSV: h_distance_human0, h_yielding_human1, etc.
+                    safety_data[f'h_{barrier_name}_human{human_idx}'] = h_val
+                    safety_data[f'h_dot_{barrier_name}_human{human_idx}'] = h_dot_val
+                    safety_data[f'cbf_{barrier_name}_human{human_idx}'] = cbf_val
+                    safety_data[f'violation_{barrier_name}_human{human_idx}'] = cbf_val < 0
+                    safety_data[f'alpha_{barrier_name}_human{human_idx}'] = alpha_val
+                    
+                    # Track minimum values for aggregated fields (most critical)
+                    if h_val < min_values[barrier_name]:
+                        min_values[barrier_name] = h_val
+                        safety_data[f'h_{barrier_name}'] = h_val
+                        safety_data[f'h_dot_{barrier_name}'] = h_dot_val
+                        safety_data[f'cbf_{barrier_name}'] = cbf_val
+                        safety_data[f'alpha_{barrier_name}'] = alpha_val
+                    
+                    # Track violations for aggregated fields
+                    if cbf_val < 0:
+                        max_violations[barrier_name] = True
+        
+        # Set aggregated violation flags
+        for barrier_name in barrier_names:
+            safety_data[f'violation_{barrier_name}'] = max_violations[barrier_name]
+
+    except Exception as e:
+        logger.info(f"Error extracting safety data: {e}")
+        
+    return safety_data

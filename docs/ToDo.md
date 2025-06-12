@@ -1,4 +1,4 @@
-# Bi-Level Optimization Framework Implementation Plan
+# Optimization Framework Implementation Plan
 
 ## Phase 1: Core Components Implementation
 - [ ] Robot Model (src/models/robot.py)

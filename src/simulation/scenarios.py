@@ -48,10 +48,18 @@ class BaseScenario:
             self.goal = np.array(self.config['scenario']['to_goal']['goal'])
             self.initial_position = np.array(self.config['scenario']['to_goal']['initial_position'])
             self.goal_tolerance = self.config['scenario']['to_goal']['goal_tolerance']
-            self.human_positions = np.array(self.config['scenario']['to_goal']['humans']['positions'])
-            self.human_velocities = np.array(self.config['scenario']['to_goal']['humans']['velocities'])
-            # Set a default desired velocity for to_goal scenario
-
+        # Extract human states from scenario
+        self.human_states = []
+        scenario_config = self.config.get('scenario', {}).get(self.scenario_name, {})
+        if 'humans' in scenario_config:
+            human_positions = scenario_config['humans'].get('positions', [])
+            human_velocities = scenario_config['humans'].get('velocities', [])
+            for pos, vel in zip(human_positions, human_velocities):
+                self.human_states.append({
+                    'position': np.array(pos),
+                    'velocity': np.array(vel)
+                })
+                    
     def get_desired_state(self, time: float) -> np.ndarray:
         """Get the desired state of the scenario including velocities."""
         if self.scenario_name == 'circle':
@@ -169,8 +177,10 @@ class BaseScenario:
 
     def get_human_positions(self) -> np.ndarray:
         """Get the positions of humans in the scenario."""
-        if self.scenario_name == 'to_goal':
-            return self.human_positions
+        # Check if current scenario has humans configuration
+        scenario_config = self.config['scenario'].get(self.scenario_name, {})
+        if 'humans' in scenario_config and 'positions' in scenario_config['humans']:
+            return np.array(scenario_config['humans']['positions'])
         else:
-            return np.array([])  # No humans in other scenarios
+            return np.array([])  # No humans configured for this scenario
 

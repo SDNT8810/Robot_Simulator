@@ -7,6 +7,7 @@ and provides a faster alternative to the CasADi-based MPC implementation.
 import numpy as np
 import time
 from dataclasses import dataclass
+from typing import Dict, Any
 from src.models.robot import Robot4WSD
 
 @dataclass
@@ -96,14 +97,15 @@ class FastMPC:
             self.learning_rate = 1.0
             self.min_accuracy = 1e-3
             self.max_time = 0.02
-        
-    def action(self, state: np.ndarray, desired_state: np.ndarray) -> np.ndarray:
+
+    def action(self, state: np.ndarray, desired_state: np.ndarray, safety_data: Dict[str, Any]) -> np.ndarray:
         """Compute control action using MPC.
         
         Args:
             state: Current robot state [x, y, θ, vx, vy, omega]
             desired_state: Desired robot state [x, y, θ, vx, vy, omega]
-                
+            safety_data: Safety-related data for the current simulation step
+
         Returns:
             Control action [δ_front, δ_rear, V_FL, V_FR, V_RL, V_RR]
             where δ are steering angles in radians and V are motor voltages.

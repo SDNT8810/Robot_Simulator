@@ -1,7 +1,7 @@
 # Timing Parameters
 timing:
   time_step: 0.002  # Simulation and control time step (s)
-  total_time: 20.0  # Total simulation time (s)
+  total_time: 2.0  # Total simulation time (s)
 
 # logging Parameters
 logging:
@@ -25,26 +25,29 @@ logging:
 
 # Visualization Parameters
 visualization:
+  mode: "MPC"  # Control mode (MPC, PID)
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
+    - position: true  # Robot position plot
     - State: true  # Robot Velocity State plot
     - Velocity: true  # Speed and Angular Velocity plot
     - Error: true  # Error plot
     - SafetyViolation: true  # Safety violation plot
     - ControlInput: true  # Control input plot
   enabled: true  # Enable visualization
-  view_time_window: 10.0  # Time window for plots (s)
-  plot_margin: 5  # Y-axis margin
+  view_time_window: 15.0  # Time window for plots (s)
+  plot_margin: 8  # Y-axis margin
   position_view_radius: 1.0  # XY plot radius (m)
+  fontsize: 8  # Font size for plots
   wheel_scale:
-    width: 0.1  # Wheel visualization width scale
-    length: 1  # Wheel visualization length scale
+    width: 0.3  # Wheel visualization width scale
+    length: 1.5  # Wheel visualization length scale
   margins:
     mode: "Auto_Center"  # Visualization mode (Auto_Center, Fixed)
     fixed_center:
       x: 0.0  # Fixed X-axis center
       y: 0.0  # Fixed Y-axis center
-    margin: 7  # Auto center margin
-    plot: 5  # Plot margins
+    margin: 8  # Auto center margin
+    plot: 8  # Plot margins
 
 # Simulation Conditions
 initial:
@@ -123,7 +126,7 @@ safety:
       slope: -1.0  # Velocity reduction per meter
       min: -2.0  # Allow negative velocity for backward movement (m/s)
       max: 3.0  # Absolute maximum velocity (m/s)
-      omega_max: 2.0  # Maximum angular velocity (rad/s)
+      omega_max: 3.0  # Maximum angular velocity (rad/s)
     acceleration:
       base: 1.0  # Base maximum acceleration (m/s²)
       slope: -1.0  # Acceleration reduction per meter
@@ -156,8 +159,7 @@ safety:
 # Controller Parameters (From Equation 12 in paper)
 controller:
   # Control type
-  type: "PID"  # Type of controller (MPC, PID, BiLVLMPC etc.)
-  mode: "MPC"  # Control mode (MPC, PID)
+  type: "PID"  # Type of controller (FastMPC, BiLVLMPC, SimplifiedMPC, PID, etc.)
   front_rear_scale: -1.0 # Front-rear steering scale factor
   # PID parameters - Simplified for direct control
   pid:
@@ -175,9 +177,9 @@ controller:
   # MPC parameters
   mpc:
     # Prediction horizon
-    prediction_horizon: 20  # Increased from 15 for longer planning
-    control_horizon: 5  # Increased from 1 for smoother control
-    time_step: 0.1  # Reduced from 0.2 for more precise control
+    prediction_horizon: 5  # Increased from 15 for longer planning
+    control_horizon: 1  # Increased from 1 for smoother control
+    time_step: 0.02  # Reduced from 0.2 for more precise control
     
     # Control weights
     weights:
@@ -208,12 +210,19 @@ scenario:
     radius: 4.0  # Radius of the circle (m)
     center: [0.0, 0.0]  # Center of the circle [x, y]
     speed: 2.5  # Further increased target speed for more agility testing
-
+    
+    # Static human obstacles (from paper scenario)
+    humans:
+      positions:
+        - [-4.5, 4.0, 0.0]  # First  human [x, y, ψ]
+      velocities:
+        - [0.0, 0.0, 0.0]   # Static humans
+       
   to_goal:
     # Path to goal
-    initial_position: [0.0, -3.0, 90.0]  # Initial position [x, y, theta]
+    initial_position: [0.0, -4.0, 90.0]  # Initial position [x, y, theta]
     initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
-    goal: [0.0, 7.0]  # Goal position [x, y]
+    goal: [0.0, 8.0]  # Goal position [x, y]
     goal_tolerance: 1.0  # Tolerance for reaching the goal (m)
     desired_velocity: 1.0  # Reduced from 1.0 to start slower
     
@@ -225,8 +234,10 @@ scenario:
     # Static human obstacles (from paper scenario)
     humans:
       positions:
-        - [-1.5, 3.0, 0.0]  # First human [x, y, ψ]
-        - [1.5, 3.0, 0.0]   # Second human [x, y, ψ]
+        - [-4.5, 4.0, 0.0]  # First  human [x, y, ψ]
+        - [4.5, 4.0, 0.0]   # Second human [x, y, ψ]
+        - [-1.0, 0.0, 0.0]   # third  human [x, y, ψ]
       velocities:
         - [0.0, 0.0, 0.0]   # Static humans
+        - [0.0, 0.0, 0.0]
         - [0.0, 0.0, 0.0]
