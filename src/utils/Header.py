@@ -321,7 +321,9 @@ def run_simulation(sim: Simulation) -> int:
     finally:
         # Always attempt to finalize GIF (safe no-op if disabled)
         try:
-            if hasattr(Visualizer, 'finalize_gif'):
+            if hasattr(Visualizer, 'finalize_media'):
+                Visualizer.finalize_media()
+            elif hasattr(Visualizer, 'finalize_gif'):
                 Visualizer.finalize_gif()
         except Exception as _gif_err:
             logger.warning(f"Failed to finalize GIF: {_gif_err}")

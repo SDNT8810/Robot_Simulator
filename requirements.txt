@@ -13,3 +13,4 @@ pathlib  # For platform-independent path handling
 argparse  # For command-line argument parsing
 python-tk  # For tkinter (used in visualization)
 imageio>=2.34.0  # For GIF export
+imageio-ffmpeg>=0.5.0  # For MP4 (video) export via imageio

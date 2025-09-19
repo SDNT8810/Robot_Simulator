@@ -6,7 +6,7 @@ visualization:
   show_trajectory: true  # Show trajectory in visualization
   show_lidar_beams: true  # Show lidars in visualization
   lidar_params:  # Parameters for LIDAR
-    num_beams: 120  # Increased from 16 for better resolution
+    num_beams: 80  # Increased from 16 for better resolution
     max_range: 4.0  # Reduced from 10.0 for closer obstacle detection
     fov: 6.28319  # Field of view in radians (2*pi for 360 degrees)
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
@@ -36,10 +36,10 @@ scenario:
   circle:
     initial_position: [0.0, 0.0, 30.0]  # Initial position [x, y, theta]
     radius: 4.0  # Radius of the circle (m)
-    speed: 2.99   # Further increased target speed for more agility testing
+    speed: 1.99   # Further increased target speed for more agility testing
   to_goal:
     # Path to goal
     initial_position: [0.0, -3.0, 0.0]  # Initial position [x, y, theta]
     initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
-    goal: [0.0, 7.0]  # Goal position [x, y]
-    desired_velocity: 1.0  # Reduced from 1.0 to start slower
+    goal: [1.0, 1.0]  # Goal position [x, y]
+    desired_velocity: 0.5  # Reduced from 1.0 to start slower

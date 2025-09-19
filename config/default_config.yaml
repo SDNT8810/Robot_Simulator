@@ -55,6 +55,11 @@ visualization:
   gif_dpi: 110
   gif_frame_stride: 1       # Capture every Nth visualization frame
   gif_frame_duration: 0.07  # Seconds per frame in resulting GIF
+  # MP4 export options (higher quality, smaller size). Requires imageio-ffmpeg.
+  save_mp4: true           # Set true to record MP4 video
+  mp4_filename: "simulation.mp4"
+  mp4_fps: 15               # Output video frame rate
+  mp4_codec: "libx264"      # Preferred codec (if available)
   wheel_scale:
     width: 0.3  # Wheel visualization width scale
     length: 1.5  # Wheel visualization length scale
@@ -239,9 +244,9 @@ scenario:
     # Path to goal
     initial_position: [0.0, -4.0, 90.0]  # Initial position [x, y, theta]
     initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
-    goal: [0.0, 8.0]  # Goal position [x, y]
+    goal: [0.0, 18.0]  # Goal position [x, y]
     goal_tolerance: 1.0  # Tolerance for reaching the goal (m)
-    desired_velocity: 1.0  # Reduced from 1.0 to start slower
+    desired_velocity: 0.5  # Reduced from 1.0 to start slower
     
     # Dynamic obstacles
     dynamic_obstacles:
@@ -251,9 +256,13 @@ scenario:
     # Static human obstacles (from paper scenario)
     humans:
       positions:
-        - [-3.0, 4.0, 0.0]  # First  human [x, y, ψ]
-        - [4.0, 4.0, 0.0]   # Second human [x, y, ψ]
+        - [-2.0, 4.5, 0.0]  # First  human [x, y, ψ]
+        - [4.5, 4.0, 0.0]   # Second human [x, y, ψ]
         - [-1.0, 1.0, 0.0]   # third  human [x, y, ψ]
+        - [-1.5, 9.0, 0.0]   # fourth human [x, y, ψ]
+        - [4.5, 10.0, 0.0]   # fifth human [x, y, ψ]
+        - [5.0, 14.0, 0.0]   # sixth human [x, y, ψ]
+        - [-1.0, 16.0, 0.0]   # seventh human [x, y, ψ]
       velocities:
         - [0.0, 0.0, 0.0]   # Static humans
         - [0.0, 0.0, 0.0]

@@ -85,17 +85,31 @@ class RobotVisualizer:
             cls.setup_plots(simulation.config)
             # Initialize GIF writer if enabled
             vis_cfg = simulation.config.get('visualization', {})
-            if vis_cfg.get('save_gif', False) and imageio is not None:
+            cls._gif_frames = None
+            cls._video_frames = None
+            vis_have_img = imageio is not None
+            if vis_cfg.get('save_gif', False) and vis_have_img:
                 cls._gif_frames = []
                 cls._gif_filename = vis_cfg.get('gif_filename', 'simulation.gif')
                 cls._gif_dpi = vis_cfg.get('gif_dpi', 120)
-                cls._gif_every = max(1, int(vis_cfg.get('gif_frame_stride', 1)))  # capture every N visual updates
+                cls._gif_every = max(1, int(vis_cfg.get('gif_frame_stride', 1)))
                 cls._gif_counter = 0
                 logger.info(f"GIF capture enabled: file={cls._gif_filename}, stride={cls._gif_every}, dpi={cls._gif_dpi}")
-            else:
-                cls._gif_frames = None
-                if vis_cfg.get('save_gif', False) and imageio is None:
-                    logger.warning("save_gif is True but imageio is not installed. Install imageio to enable GIF export.")
+            elif vis_cfg.get('save_gif', False) and not vis_have_img:
+                logger.warning("save_gif is True but imageio not installed.")
+
+            # MP4 capture uses same raw frames (store once) then encode
+            if vis_cfg.get('save_mp4', False) and vis_have_img:
+                cls._video_frames = []
+                cls._mp4_filename = vis_cfg.get('mp4_filename', 'simulation.mp4')
+                cls._mp4_fps = int(vis_cfg.get('mp4_fps', 15))
+                cls._mp4_codec = vis_cfg.get('mp4_codec', 'libx264')
+                # Reuse gif stride for capture cadence
+                if not hasattr(cls, '_gif_every'):
+                    cls._gif_every = 1
+                logger.info(f"MP4 capture enabled: file={cls._mp4_filename}, fps={cls._mp4_fps}")
+            elif vis_cfg.get('save_mp4', False) and not vis_have_img:
+                logger.warning("save_mp4 is True but imageio not installed.")
             # Initialize history with additional fields for Error and Control plots
             cls.history = {
                 't': [], 'x': [], 'y': [], 'v': [], 'omega': [],
@@ -531,74 +545,95 @@ class RobotVisualizer:
         cls.fig.canvas.flush_events()
 
         # Capture GIF frame if enabled
-        if getattr(cls, '_gif_frames', None) is not None:
+        if getattr(cls, '_gif_frames', None) is not None or getattr(cls, '_video_frames', None) is not None:
             cls._gif_counter += 1
             if cls._gif_counter % cls._gif_every == 0:
                 buf = io.BytesIO()
                 # Use consistent canvas region (no tight bbox) to keep frame shapes identical
                 cls.fig.savefig(buf, format='png', dpi=cls._gif_dpi)
                 buf.seek(0)
-                cls._gif_frames.append(imageio.imread(buf))
+                frame_img = imageio.imread(buf)
+                if getattr(cls, '_gif_frames', None) is not None:
+                    cls._gif_frames.append(frame_img)
+                if getattr(cls, '_video_frames', None) is not None:
+                    cls._video_frames.append(frame_img)
                 buf.close()
-                if len(cls._gif_frames) == 1:
+                if (getattr(cls, '_gif_frames', []) or getattr(cls, '_video_frames', [])) and cls._gif_counter == cls._gif_every:
                     logger.debug("First GIF frame captured.")
 
     @classmethod
     def finalize_gif(cls):
-        """Write accumulated frames to GIF file."""
-        if getattr(cls, '_gif_frames', None) is None:
-            logger.debug("finalize_gif called but GIF capture was not initialized.")
-            return
-        if imageio is None:
-            logger.warning("Cannot finalize GIF: imageio not available.")
-            cls._gif_frames = None
-            return
-        frame_count = len(cls._gif_frames)
-        if frame_count == 0:
-            logger.warning("GIF finalize requested but no frames were captured (frame_count=0). Nothing will be written.")
-            cls._gif_frames = None
-            return
+        """Backward-compatible wrapper to finalize all media."""
+        cls.finalize_media()
+
+    @classmethod
+    def _normalize_frames(cls, frames):
+        if not frames:
+            return frames
         try:
-            duration = cls.config.get('visualization', {}).get('gif_frame_duration', 0.07)
-            # Normalize frame shapes if they differ (safety guard)
-            try:
-                shapes = {frame.shape for frame in cls._gif_frames}
-            except Exception:
-                shapes = set()
-            if len(shapes) > 1:
-                logger.warning(f"Inconsistent frame shapes detected {shapes}; resizing to first frame shape.")
-                import numpy as _np
-                target_shape = cls._gif_frames[0].shape
-                resized = []
-                for fr in cls._gif_frames:
-                    if fr.shape != target_shape:
-                        # Simple resize via numpy slicing/padding (keep center)
-                        ty, tx = target_shape[0], target_shape[1]
-                        fy, fx = fr.shape[0], fr.shape[1]
-                        # Crop or pad in y
-                        if fy > ty:
-                            starty = (fy - ty)//2
-                            fr = fr[starty:starty+ty, :]
-                        elif fy < ty:
-                            pad_top = (ty - fy)//2
-                            pad_bottom = ty - fy - pad_top
-                            fr = _np.pad(fr, ((pad_top,pad_bottom),(0,0),(0,0)), mode='edge')
-                        # Crop or pad in x
-                        if fx > tx:
-                            startx = (fx - tx)//2
-                            fr = fr[:, startx:startx+tx, :]
-                        elif fx < tx:
-                            pad_left = (tx - fx)//2
-                            pad_right = tx - fx - pad_left
-                            fr = _np.pad(fr, ((0,0),(pad_left,pad_right),(0,0)), mode='edge')
-                    resized.append(fr)
-                cls._gif_frames = resized
-            imageio.mimsave(cls._gif_filename, cls._gif_frames, duration=duration)
-            logger.info(f"Saved GIF animation to {cls._gif_filename} with {frame_count} frames (frame_duration={duration}s)")
-        except Exception as e:
-            logger.error(f"Failed to save GIF: {e}")
-        finally:
+            shapes = {fr.shape for fr in frames}
+        except Exception:
+            return frames
+        if len(shapes) == 1:
+            return frames
+        import numpy as _np
+        target = frames[0].shape
+        out = []
+        ty, tx = target[0], target[1]
+        for fr in frames:
+            if fr.shape == target:
+                out.append(fr)
+                continue
+            fy, fx = fr.shape[0], fr.shape[1]
+            # Crop/pad Y
+            if fy > ty:
+                sy = (fy - ty)//2
+                fr = fr[sy:sy+ty, :]
+            elif fy < ty:
+                pad_top = (ty - fy)//2
+                pad_bottom = ty - fy - pad_top
+                fr = _np.pad(fr, ((pad_top,pad_bottom),(0,0),(0,0)), mode='edge')
+            # Crop/pad X
+            fy, fx = fr.shape[0], fr.shape[1]
+            if fx > tx:
+                sx = (fx - tx)//2
+                fr = fr[:, sx:sx+tx, :]
+            elif fx < tx:
+                pad_left = (tx - fx)//2
+                pad_right = tx - fx - pad_left
+                fr = _np.pad(fr, ((0,0),(pad_left,pad_right),(0,0)), mode='edge')
+            out.append(fr)
+        return out
+
+    @classmethod
+    def finalize_media(cls):
+        if imageio is None:
+            return
+        # GIF
+        if getattr(cls, '_gif_frames', None) is not None:
+            frames = cls._normalize_frames(cls._gif_frames)
+            if frames:
+                duration = cls.config.get('visualization', {}).get('gif_frame_duration', 0.07)
+                try:
+                    imageio.mimsave(cls._gif_filename, frames, duration=duration)
+                    logger.info(f"Saved GIF animation to {cls._gif_filename} ({len(frames)} frames)")
+                except Exception as e:
+                    logger.error(f"Failed to save GIF: {e}")
             cls._gif_frames = None
+        # MP4
+        if getattr(cls, '_video_frames', None) is not None:
+            frames_v = cls._normalize_frames(cls._video_frames)
+            if frames_v:
+                try:
+                    writer_args = {}
+                    fps = getattr(cls, '_mp4_fps', 15)
+                    codec = getattr(cls, '_mp4_codec', 'libx264')
+                    # imageio-ffmpeg will pick codec automatically; metadata minimal
+                    imageio.mimsave(cls._mp4_filename, frames_v, fps=fps, macro_block_size=None)  # macro_block_size=None avoids resize
+                    logger.info(f"Saved MP4 video to {cls._mp4_filename} ({len(frames_v)} frames @ {fps} fps)")
+                except Exception as e:
+                    logger.error(f"Failed to save MP4: {e}")
+            cls._video_frames = None
     
     @classmethod
     def _get_enabled_plots(cls, config: Dict) -> List[str]:

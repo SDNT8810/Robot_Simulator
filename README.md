@@ -2,6 +2,7 @@
 
 A modular and expandable framework for simulating robotic vehicles in a 2D environment. The framework supports various controllers and robot models, making it ideal for testing and development in robotics research and education.
 
+![Demo](./simulation.gif)
 ## Description
 
 This framework provides a 2D simulation environment with built-in support for PID and MPC controllers, as well as kinematic and dynamic solvers. It is designed to be modular and easily extendable, allowing users to:
