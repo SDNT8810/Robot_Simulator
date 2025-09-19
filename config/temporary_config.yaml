@@ -1,6 +1,6 @@
 timing:
-  time_step: 0.02  # Simulation and control time step (s)
-  total_time: 10.5  # Total simulation time (s)
+  time_step: 0.01  # Simulation and control time step (s)
+  total_time: 22.5  # Total simulation time (s)
 visualization:
   enabled: true  # Enable visualization
   show_trajectory: true  # Show trajectory in visualization
@@ -14,16 +14,15 @@ visualization:
     - Velocity: false  # Speed and Angular Velocity plot
     - Error: false  # Error plot
     - SafetyViolation: false  # Safety violation plot
-    - ControlInput: false  # Control input plot
     - fuzzyMF: true # subplot 322
     - fuzzyPolar: true # subplot 321
-    - fuzzyFunctions: true # Fuzzy functions plot (subplot 312)
-    
+    - fuzzyFunctions: false # Fuzzy functions plot (subplot 312)
+    - ControlInput: true  # Control input plot
 robot:
   model: "kinematics"  # Type of simulation (kinematics, dynamics)
 controller:
   mode: "MCP"  
-  type: "PID"  # Use the FastMPC, BiLVLMPC, SimplifiedMPC, PID controller
+  type: "Fuzzy"  # Use the FastMPC, BiLVLMPC, SimplifiedMPC, PID, Fuzzy controller
   mpc:
     # Prediction horizon
     prediction_horizon: 20  # Increased from 15 for longer planning
@@ -41,5 +40,5 @@ scenario:
     # Path to goal
     initial_position: [0.0, -3.0, 0.0]  # Initial position [x, y, theta]
     initial_speed: [0.0, 0.0, 0.0]  # Initial speed [vx, vy, omega]
-    goal: [1.0, 1.0]  # Goal position [x, y]
+    goal: [-2.0, 21.0]  # Goal position [x, y]
     desired_velocity: 0.5  # Reduced from 1.0 to start slower

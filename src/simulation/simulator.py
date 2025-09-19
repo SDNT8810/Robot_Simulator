@@ -8,6 +8,8 @@ from src.controllers.mpc import BiLevelMPC
 from src.controllers.simplified_mpc import SimplifiedMPC
 from src.controllers.fast_mpc import FastMPC
 from src.controllers.pid import PID
+from src.controllers.fuzzy import Fuzzy
+from src.models.Lidar import Lidar
 from src.models.robot import Robot4WSD
 from src.safety.barrier import extract_safety_data
 
@@ -34,16 +36,23 @@ class Simulation:
         self.action = np.concatenate([[0, 0], [0, 0, 0, 0]])
 
         # Initialize controller based on config
-        if config['controller']['type'] == 'PID':
+        ctype = config['controller']['type']
+        if ctype == 'PID':
             self.controller = PID(config)
-        elif config['controller']['type'] == 'BiLVLMPC':
+        elif ctype == 'BiLVLMPC':
             self.controller = BiLevelMPC(config)
-        elif config['controller']['type'] == 'SimplifiedMPC':
+        elif ctype == 'SimplifiedMPC':
             self.controller = SimplifiedMPC(config)
-        elif config['controller']['type'] == 'FastMPC':
+        elif ctype == 'FastMPC':
             self.controller = FastMPC(config)
+        elif ctype == 'Fuzzy':
+            self.controller = Fuzzy(config)
         else:
-            raise ValueError(f"Unsupported controller type: {config['controller']['type']}")
+            raise ValueError(f"Unsupported controller type: {ctype}")
+
+        # Lidar sensor setup (used by fuzzy controller; harmless otherwise)
+        vis_lidar_cfg = config['visualization']['lidar_params']
+        self.lidar = Lidar(num_beams=vis_lidar_cfg['num_beams'], max_range=vis_lidar_cfg['max_range'], fov=vis_lidar_cfg['fov'])
                 
         # Store history for visualization
         self.input_history = {}  # Store control inputs
@@ -77,6 +86,10 @@ class Simulation:
         self.safety_data = extract_safety_data(self)
         self.sim_data.update(self.safety_data)
 
+        # Always collect lidar (lightweight) so fuzzy controller can use it via safety_data
+        _, distances, angles = self.lidar.cast_rays(self.robot.state[0], self.robot.state[1], self.robot.state[2], obstacles=[])
+        self.safety_data['lidar_distances'] = distances
+        self.safety_data['lidar_angles'] = angles
         action = self.controller.action(self.robot.state, self.desired_state, self.safety_data)
 
         # Actuator inputs (flat structure for CSV)

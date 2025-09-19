@@ -924,6 +924,16 @@ class RobotVisualizer:
             import warnings
             warnings.warn(f"LIDAR visualization failed: {e}")
 
+        # Precompute goal_dir_deg_hist once for all fuzzy plots (even if some disabled)
+        goal_dir_deg_hist = 0.0
+        if hasattr(cls, 'last_lidar') and cls.history.get('x_d') and cls.history['x_d']:
+            try:
+                x_d_last = cls.history['x_d'][-1]
+                y_d_last = cls.history['y_d'][-1]
+                goal_dir_deg_hist = np.rad2deg(np.arctan2(y_d_last - y, x_d_last - x) - theta)
+            except Exception:
+                goal_dir_deg_hist = 0.0
+
         # Render fuzzyPolar (subplot 221 equivalent)
         if 'fuzzyPolar' in cls.enabled_plots and 'fuzzyPolar' in cls.ax_plots and hasattr(cls, 'last_lidar'):
             axp = cls.ax_plots['fuzzyPolar']
@@ -939,13 +949,7 @@ class RobotVisualizer:
             max_range = cls.last_lidar['max_range']
             # Compute fuzzy section values for polar overlay rings
             fz = FuzzyFunctions(FuzzyParams())
-            # Goal direction from history desired position
-            if cls.history.get('x_d') and cls.history['x_d']:
-                x_d_last = cls.history['x_d'][-1]
-                y_d_last = cls.history['y_d'][-1]
-                goal_dir_deg_hist = np.rad2deg(np.arctan2(y_d_last - y, x_d_last - x) - theta)
-            else:
-                goal_dir_deg_hist = 0.0
+            # goal_dir_deg_hist already computed above
             out = fz.compute(cls.last_lidar['angles_rad'], distances, max_range, goal_dir_deg=goal_dir_deg_hist)
             sec_deg = out['sec_deg']
             sec_free_val = out['sec_free_val']
