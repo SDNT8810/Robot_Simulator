@@ -304,20 +304,27 @@ def run_simulation(sim: Simulation) -> int:
                 plt.pause(0.001)
 
         logger.info("Simulation complete")
-        
+
         # Save final figure
         if config['visualization']['enabled']:
             plt.savefig('simulation_result.png', bbox_inches='tight', dpi=600)
             logger.info("Saved final figure as simulation_result.png")
-            
+
             # Save individual subplots to plots directory
             Visualizer.save_individual_subplots()
-        
+
         return 0
-        
+
     except Exception as e:
         logger.error(f"Simulation failed: {str(e)}")
         return 1
+    finally:
+        # Always attempt to finalize GIF (safe no-op if disabled)
+        try:
+            if hasattr(Visualizer, 'finalize_gif'):
+                Visualizer.finalize_gif()
+        except Exception as _gif_err:
+            logger.warning(f"Failed to finalize GIF: {_gif_err}")
 class CSVFormatter(logging.Formatter):
     """Custom formatter for CSV logs"""
     def __init__(self, fields):

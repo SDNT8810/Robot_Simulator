@@ -26,6 +26,7 @@ logging:
 # Visualization Parameters
 visualization:
   mode: "MPC"  # Control mode (MPC, PID)
+  enabled: true  # Enable visualization
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
     - position: true  # Robot position plot
     - State: true  # Robot Velocity State plot
@@ -33,11 +34,27 @@ visualization:
     - Error: true  # Error plot
     - SafetyViolation: true  # Safety violation plot
     - ControlInput: true  # Control input plot
-  enabled: true  # Enable visualization
+    # Optional fuzzy / lidar related plots (disabled by default)
+    - fuzzyPolar: false
+    - fuzzyMF: false
+    - fuzzyFunctions: false
   view_time_window: 15.0  # Time window for plots (s)
   plot_margin: 8  # Y-axis margin
   position_view_radius: 1.0  # XY plot radius (m)
   fontsize: 8  # Font size for plots
+  # LIDAR visualization options
+  show_lidar_beams: false  # Set true to draw lidar beams
+  lidar_params:
+    num_beams: 64
+    max_range: 6.0
+    fov: 6.283185307179586  # 2*pi radians
+    obstacle_radius: 1.5  # Override for human hit radius (defaults to safety.rho_0)
+  # GIF export options
+  save_gif: true           # Set true to record animation
+  gif_filename: "simulation.gif"
+  gif_dpi: 110
+  gif_frame_stride: 1       # Capture every Nth visualization frame
+  gif_frame_duration: 0.07  # Seconds per frame in resulting GIF
   wheel_scale:
     width: 0.3  # Wheel visualization width scale
     length: 1.5  # Wheel visualization length scale
@@ -234,9 +251,9 @@ scenario:
     # Static human obstacles (from paper scenario)
     humans:
       positions:
-        - [-4.5, 4.0, 0.0]  # First  human [x, y, ψ]
-        - [4.5, 4.0, 0.0]   # Second human [x, y, ψ]
-        - [-1.0, 0.0, 0.0]   # third  human [x, y, ψ]
+        - [-3.0, 4.0, 0.0]  # First  human [x, y, ψ]
+        - [4.0, 4.0, 0.0]   # Second human [x, y, ψ]
+        - [-1.0, 1.0, 0.0]   # third  human [x, y, ψ]
       velocities:
         - [0.0, 0.0, 0.0]   # Static humans
         - [0.0, 0.0, 0.0]

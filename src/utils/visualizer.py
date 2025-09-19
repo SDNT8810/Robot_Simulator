@@ -10,6 +10,12 @@ from src.models.robot import Robot4WSD
 import math
 import casadi as ca
 import logging
+import io
+
+try:
+    import imageio.v2 as imageio
+except ImportError:  # Optional dependency
+    imageio = None
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,8 @@ class RobotVisualizer:
             
             # Read plot configuration from config
             cls.config = simulation.config  # Store config for later use
+            # Keep a reference to the simulation object for access in update methods
+            cls.simulation = simulation
             cls.enabled_plots = cls._get_enabled_plots(simulation.config)
             
             # Create dynamic layout based on enabled plots
@@ -75,6 +83,19 @@ class RobotVisualizer:
             cls.ax_v_omega = cls.ax_plots.get('Velocity', None)
             
             cls.setup_plots(simulation.config)
+            # Initialize GIF writer if enabled
+            vis_cfg = simulation.config.get('visualization', {})
+            if vis_cfg.get('save_gif', False) and imageio is not None:
+                cls._gif_frames = []
+                cls._gif_filename = vis_cfg.get('gif_filename', 'simulation.gif')
+                cls._gif_dpi = vis_cfg.get('gif_dpi', 120)
+                cls._gif_every = max(1, int(vis_cfg.get('gif_frame_stride', 1)))  # capture every N visual updates
+                cls._gif_counter = 0
+                logger.info(f"GIF capture enabled: file={cls._gif_filename}, stride={cls._gif_every}, dpi={cls._gif_dpi}")
+            else:
+                cls._gif_frames = None
+                if vis_cfg.get('save_gif', False) and imageio is None:
+                    logger.warning("save_gif is True but imageio is not installed. Install imageio to enable GIF export.")
             # Initialize history with additional fields for Error and Control plots
             cls.history = {
                 't': [], 'x': [], 'y': [], 'v': [], 'omega': [],
@@ -280,6 +301,10 @@ class RobotVisualizer:
             try:
                 for ln in list(ax.lines):
                     ln.remove()
+                # Remove previous collections (e.g., from potential fills) if any
+                for coll in list(ax.collections):
+                    try: coll.remove()
+                    except Exception: pass
                 if getattr(ax, 'legend_', None) is not None:
                     ax.legend_.remove()
             except Exception:
@@ -294,19 +319,23 @@ class RobotVisualizer:
                 fz = FuzzyFunctions(FuzzyParams())
                 out = fz.compute(angles_rad, distances, max_range, goal_dir_deg=goal_dir_deg)
                 deg_grid = out['deg_grid']
-                lidar_norm = out['lidar_norm']
+                lidar_norm = out['lidar_norm']  # 0..1
                 sec_deg = out['sec_deg']
                 sec_free_val = out['sec_free_val']
                 goal_dir_val = out['goal_dir_val']
-
-                # Plot normalized lidar and section values
-                ax.plot(deg_grid, lidar_norm, 'r--', linewidth=1.0, label='LIDAR (norm)')
-                ax.plot(np.r_[-180, sec_deg], np.r_[sec_free_val[-1], sec_free_val], 'b-', linewidth=2.0, label='Section Free')
-                ax.plot(np.r_[-180, sec_deg], np.r_[goal_dir_val[-1], goal_dir_val], 'k-', linewidth=2.0, label='Goal-Weighted')
-                # Mark goal direction
-                ax.plot([goal_dir_deg, goal_dir_deg], [0, 1], 'r-', linewidth=1.5, label='Goal Dir')
+                # Scale everything to physical range (0..max_range) instead of normalized
+                lidar_dist = lidar_norm * max_range
+                # sec_free_scaled = np.array(sec_free_val) * max_range
+                # goal_dir_scaled = np.array(goal_dir_val) * max_range
+                sec_free_scaled = np.array(sec_free_val)
+                goal_dir_scaled = np.array(goal_dir_val)
+                ax.plot(deg_grid, lidar_dist, 'r--', linewidth=1.0, label='LIDAR')
+                ax.plot(np.r_[-180, sec_deg], np.r_[sec_free_scaled[-1], sec_free_scaled], 'b-', linewidth=2.0, label='Section Free')
+                ax.plot(np.r_[-180, sec_deg], np.r_[goal_dir_scaled[-1], goal_dir_scaled], 'k-', linewidth=2.0, label='Goal-Weighted')
+                ax.plot([goal_dir_deg, goal_dir_deg], [0, max_range], 'r-', linewidth=1.2, label='Goal Dir')
                 ax.set_xlim([-180, 180])
-                ax.set_ylim([0, 1.05])
+                ax.set_ylim([0, max_range * 1.05])
+                ax.set_ylabel(f"Distance / Score (m)")
         
         # Update Error plot if enabled
         if 'Error' in cls.enabled_plots:
@@ -500,6 +529,76 @@ class RobotVisualizer:
         
         cls.fig.canvas.draw()
         cls.fig.canvas.flush_events()
+
+        # Capture GIF frame if enabled
+        if getattr(cls, '_gif_frames', None) is not None:
+            cls._gif_counter += 1
+            if cls._gif_counter % cls._gif_every == 0:
+                buf = io.BytesIO()
+                # Use consistent canvas region (no tight bbox) to keep frame shapes identical
+                cls.fig.savefig(buf, format='png', dpi=cls._gif_dpi)
+                buf.seek(0)
+                cls._gif_frames.append(imageio.imread(buf))
+                buf.close()
+                if len(cls._gif_frames) == 1:
+                    logger.debug("First GIF frame captured.")
+
+    @classmethod
+    def finalize_gif(cls):
+        """Write accumulated frames to GIF file."""
+        if getattr(cls, '_gif_frames', None) is None:
+            logger.debug("finalize_gif called but GIF capture was not initialized.")
+            return
+        if imageio is None:
+            logger.warning("Cannot finalize GIF: imageio not available.")
+            cls._gif_frames = None
+            return
+        frame_count = len(cls._gif_frames)
+        if frame_count == 0:
+            logger.warning("GIF finalize requested but no frames were captured (frame_count=0). Nothing will be written.")
+            cls._gif_frames = None
+            return
+        try:
+            duration = cls.config.get('visualization', {}).get('gif_frame_duration', 0.07)
+            # Normalize frame shapes if they differ (safety guard)
+            try:
+                shapes = {frame.shape for frame in cls._gif_frames}
+            except Exception:
+                shapes = set()
+            if len(shapes) > 1:
+                logger.warning(f"Inconsistent frame shapes detected {shapes}; resizing to first frame shape.")
+                import numpy as _np
+                target_shape = cls._gif_frames[0].shape
+                resized = []
+                for fr in cls._gif_frames:
+                    if fr.shape != target_shape:
+                        # Simple resize via numpy slicing/padding (keep center)
+                        ty, tx = target_shape[0], target_shape[1]
+                        fy, fx = fr.shape[0], fr.shape[1]
+                        # Crop or pad in y
+                        if fy > ty:
+                            starty = (fy - ty)//2
+                            fr = fr[starty:starty+ty, :]
+                        elif fy < ty:
+                            pad_top = (ty - fy)//2
+                            pad_bottom = ty - fy - pad_top
+                            fr = _np.pad(fr, ((pad_top,pad_bottom),(0,0),(0,0)), mode='edge')
+                        # Crop or pad in x
+                        if fx > tx:
+                            startx = (fx - tx)//2
+                            fr = fr[:, startx:startx+tx, :]
+                        elif fx < tx:
+                            pad_left = (tx - fx)//2
+                            pad_right = tx - fx - pad_left
+                            fr = _np.pad(fr, ((0,0),(pad_left,pad_right),(0,0)), mode='edge')
+                    resized.append(fr)
+                cls._gif_frames = resized
+            imageio.mimsave(cls._gif_filename, cls._gif_frames, duration=duration)
+            logger.info(f"Saved GIF animation to {cls._gif_filename} with {frame_count} frames (frame_duration={duration}s)")
+        except Exception as e:
+            logger.error(f"Failed to save GIF: {e}")
+        finally:
+            cls._gif_frames = None
     
     @classmethod
     def _get_enabled_plots(cls, config: Dict) -> List[str]:
@@ -816,14 +915,64 @@ class RobotVisualizer:
             sec_deg = out['sec_deg']
             sec_free_val = out['sec_free_val']
             goal_dir_val = out['goal_dir_val']
-            # Plot section values and lidar envelope
-            axp.plot(np.deg2rad(np.r_[-180, sec_deg]), np.r_[sec_free_val[-1], sec_free_val], linewidth=2)
-            axp.plot(angles_abs, np.clip(distances / max_range, 0, 1), '--', linewidth=2)
-            axp.plot(np.deg2rad(np.r_[-180, sec_deg]), np.r_[goal_dir_val[-1], goal_dir_val], 'k', linewidth=2)
-            # Goal ray
+            # --- Axis orientation adjustments ---
+            # We want robot heading (relative 0 deg) at the TOP (North) instead of right (East).
+            # Use polar zero at North so relative fuzzy angles (already centered at 0) appear correctly.
+            axp.set_theta_zero_location('N')  # 0 rad up
+            axp.set_theta_direction(1)        # Counter-clockwise positive
+
+            # Build unified relative angle grid (include -180 start) then map to [0, 360) for polar continuity
+            rel_deg_raw = np.r_[-180, sec_deg]
+            # Map to [0,360)
+            rel_deg_wrapped = (rel_deg_raw + 360) % 360
+            # Sort and keep index mapping for associated values (cyclic start value duplicated at end for closure)
+            sort_idx = np.argsort(rel_deg_wrapped)
+            rel_deg_sorted = rel_deg_wrapped[sort_idx]
+            # Corresponding section values need same ordering; construct arrays aligned with rel_deg_raw
+            sec_free_series = np.r_[sec_free_val[-1], sec_free_val]  # align with rel_deg_raw
+            goal_dir_series = np.r_[goal_dir_val[-1], goal_dir_val]
+            sec_free_sorted = sec_free_series[sort_idx]
+            goal_dir_sorted = goal_dir_series[sort_idx]
+            # Close loop explicitly
+            rel_deg_closed = np.r_[rel_deg_sorted, rel_deg_sorted[0]]
+            sec_free_closed = np.r_[sec_free_sorted, sec_free_sorted[0]]
+            goal_dir_closed = np.r_[goal_dir_sorted, goal_dir_sorted[0]]
+            rel_rad_closed = np.deg2rad(rel_deg_closed)
+            axp.plot(rel_rad_closed, sec_free_closed, linewidth=2, color='b', label='Section Free')
+            axp.plot(rel_rad_closed, goal_dir_closed, 'k', linewidth=2, label='Goal Weighted')
+
+            # Custom ticks: show -180, -135, -90, -45, 0, 45, 90, 135 (omit duplicate 180) by inverse mapping
+            tick_display = np.array([-180, -135, -90, -45, 0, 45, 90, 135])
+            tick_positions = np.deg2rad((tick_display + 360) % 360)
+            axp.set_xticks(tick_positions)
+            axp.set_xticklabels([str(td) for td in tick_display])
+
+            # LIDAR envelope should remain oriented in GLOBAL/world frame (user request: orange one is correct now),
+            # but since we rotated axis (zero at North), we COMPENSATE by shifting absolute angles by -90 deg
+            # so that global East still appears to the right.
+            angles_abs_comp = angles_abs - np.pi/2.0
+            lidar_vals = np.clip(distances / max_range, 0, 1)
+            # Close global lidar as well
+            if len(angles_abs_comp) > 1:
+                angles_abs_closed = np.r_[angles_abs_comp, angles_abs_comp[0]]
+                lidar_closed = np.r_[lidar_vals, lidar_vals[0]]
+            else:
+                angles_abs_closed = angles_abs_comp
+                lidar_closed = lidar_vals
+            axp.plot(angles_abs_closed, lidar_closed, '--', linewidth=2, color='orange', label='LIDAR (norm)')
+
+            # Goal ray (relative): simply from 0 to goal_dir relative angle (convert to rad)
             goal_dir_deg = goal_dir_deg_hist
-            axp.plot([0, np.deg2rad(goal_dir_deg)], [0, min(1, np.mean(distances / max_range))], 'r', linewidth=2)
+            goal_dir_rad = np.deg2rad(goal_dir_deg)
+            axp.plot([0, goal_dir_rad], [0, min(1, np.mean(distances / max_range))], 'r', linewidth=2, label='Goal Dir')
+
+            axp.set_rlim(0, 1.05)
             axp.set_title('Obs. and MFs (Polar)')
+            # Add legend (small font)
+            try:
+                axp.legend(loc='lower left', fontsize=cls.config.get('visualization', {}).get('fontsize', 8)-1)
+            except Exception:
+                pass
 
         # Render fuzzyMF (subplot 222 equivalent)
         if 'fuzzyMF' in cls.enabled_plots and 'fuzzyMF' in cls.ax_plots and hasattr(cls, 'last_lidar'):
@@ -832,6 +981,10 @@ class RobotVisualizer:
             try:
                 for ln in list(axm.lines):
                     ln.remove()
+                # Remove fill_between PolyCollections
+                for coll in list(axm.collections):
+                    try: coll.remove()
+                    except Exception: pass
                 if getattr(axm, 'legend_', None) is not None:
                     axm.legend_.remove()
             except Exception:
