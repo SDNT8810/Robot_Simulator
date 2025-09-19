@@ -272,6 +272,41 @@ class RobotVisualizer:
             else:
                 cls.v_omega_lines['v'].set_data(cls.history['t'], cls.history['v'])
                 cls.v_omega_lines['omega'].set_data(cls.history['t'], cls.history['omega'])
+
+        # Update fuzzyFunctions plot if enabled
+        if 'fuzzyFunctions' in cls.enabled_plots and 'fuzzyFunctions' in cls.ax_plots:
+            ax = cls.ax_plots['fuzzyFunctions']
+            # Remove previous lines/legend safely (ArtistList has no clear() in some Matplotlib versions)
+            try:
+                for ln in list(ax.lines):
+                    ln.remove()
+                if getattr(ax, 'legend_', None) is not None:
+                    ax.legend_.remove()
+            except Exception:
+                pass
+            if hasattr(cls, 'last_lidar'):
+                from src.models.fuzzyFunctions import FuzzyFunctions, FuzzyParams
+                angles_rad = cls.last_lidar['angles_rad']
+                distances = cls.last_lidar['distances']
+                max_range = cls.last_lidar['max_range']
+                # Goal direction relative to robot heading (deg)
+                goal_dir_deg = np.rad2deg(np.arctan2(y_d - y, x_d - x) - theta)
+                fz = FuzzyFunctions(FuzzyParams())
+                out = fz.compute(angles_rad, distances, max_range, goal_dir_deg=goal_dir_deg)
+                deg_grid = out['deg_grid']
+                lidar_norm = out['lidar_norm']
+                sec_deg = out['sec_deg']
+                sec_free_val = out['sec_free_val']
+                goal_dir_val = out['goal_dir_val']
+
+                # Plot normalized lidar and section values
+                ax.plot(deg_grid, lidar_norm, 'r--', linewidth=1.0, label='LIDAR (norm)')
+                ax.plot(np.r_[-180, sec_deg], np.r_[sec_free_val[-1], sec_free_val], 'b-', linewidth=2.0, label='Section Free')
+                ax.plot(np.r_[-180, sec_deg], np.r_[goal_dir_val[-1], goal_dir_val], 'k-', linewidth=2.0, label='Goal-Weighted')
+                # Mark goal direction
+                ax.plot([goal_dir_deg, goal_dir_deg], [0, 1], 'r-', linewidth=1.5, label='Goal Dir')
+                ax.set_xlim([-180, 180])
+                ax.set_ylim([0, 1.05])
         
         # Update Error plot if enabled
         if 'Error' in cls.enabled_plots:
@@ -372,9 +407,10 @@ class RobotVisualizer:
         t_min = max(0, simulation.time - window)
         t_max = simulation.time + 0.1
         
-        # Set time limits for time-series plots
+        # Set time limits only for time-series plots (exclude Map and fuzzy plots)
+        time_series_plots = {'State', 'Velocity', 'Error', 'ControlInput', 'SafetyViolation'}
         for plot_name, ax in cls.ax_plots.items():
-            if plot_name != 'Map':  # Map is not a time-series plot
+            if plot_name in time_series_plots:
                 ax.set_xlim(t_min, t_max)
         
         # Set voltage axis limits if it exists
@@ -518,11 +554,14 @@ class RobotVisualizer:
             # Create grid
             gs = cls.fig.add_gridspec(num_rows, num_cols)
             
-            # Add plots to grid
+            # Add plots to grid, using polar projection for fuzzyPolar
             for i, plot_name in enumerate(cls.enabled_plots):
                 row = i // num_cols
                 col = i % num_cols
-                cls.ax_plots[plot_name] = cls.fig.add_subplot(gs[row, col])
+                if plot_name == 'fuzzyPolar':
+                    cls.ax_plots[plot_name] = cls.fig.add_subplot(gs[row, col], projection='polar')
+                else:
+                    cls.ax_plots[plot_name] = cls.fig.add_subplot(gs[row, col])
     
     @classmethod
     def setup_plots(cls, config):
@@ -569,6 +608,22 @@ class RobotVisualizer:
                 ax.set_xlabel('Time [s]', fontsize=fontsize)
                 ax.set_ylabel('Violation', fontsize=fontsize)
                 ax.set_title('Safety Violations', fontsize=fontsize)
+            elif plot_name == 'fuzzyPolar':
+                ax.set_title('Obs. and MFs (Polar)')
+            elif plot_name == 'fuzzyMF':
+                ax.grid(True)
+                ax.set_xlabel('Angle [deg]', fontsize=fontsize)
+                ax.set_ylabel('Value', fontsize=fontsize)
+                ax.set_title('MF and Goal Consideration', fontsize=fontsize)
+                ax.set_xlim([-180, 180])
+            elif plot_name == 'fuzzyFunctions':
+                # Fuzzy functions plot
+                ax.grid(True)
+                ax.set_xlabel('Angle [deg]', fontsize=fontsize)
+                ax.set_ylabel('Membership / Normalized Distance', fontsize=fontsize)
+                ax.set_title('Fuzzy LIDAR Section Values', fontsize=fontsize)
+                ax.set_xlim([-180, 180])
+                ax.set_ylim([0, 1.05])
                 
             # Set tick label fontsize for all plots
             ax.tick_params(axis='both', which='major', labelsize=fontsize-1)
@@ -583,10 +638,10 @@ class RobotVisualizer:
     @classmethod
     def update_robot(cls, x: float, y: float, theta: float, robot: 'Robot4WSD', 
                     delta_front: float, delta_rear: float, wheel_velocities: np.ndarray):
-        """Draw robot with steered wheels."""
+        """Draw robot with steered wheels and (optionally) LIDAR beams."""
         c, s = np.cos(theta), np.sin(theta)
         R = np.array([[c, -s], [s, c]])
-        
+
         # Draw body
         length = robot.wheelbase
         width = robot.track_width
@@ -600,7 +655,7 @@ class RobotVisualizer:
         points = np.dot(body_points, R.T) + np.array([x, y])
         line, = cls.ax_plots['Map'].plot(points[:, 0], points[:, 1], 'k-', linewidth=2)
         cls.robot_patches.append(line)
-        
+
         # Draw direction arrow
         arrow = Arrow(x, y, length/2*c, length/2*s, width=0.3, color='red')
         cls.ax_plots['Map'].add_patch(arrow)
@@ -609,7 +664,7 @@ class RobotVisualizer:
         # Draw wheels with steering
         wheel_width = width * 0.2
         wheel_length = length * 0.15
-        
+
         # Wheel positions relative to center (corrected order)
         wheel_positions = [
             [length/2, width/2],    # Front left
@@ -617,7 +672,7 @@ class RobotVisualizer:
             [-length/2, width/2],   # Rear left
             [-length/2, -width/2],  # Rear right
         ]
-        
+
         # Steering angles for each wheel (removed negative signs)
         steering_angles = [
             delta_front,  # Front left
@@ -625,11 +680,11 @@ class RobotVisualizer:
             delta_rear,   # Rear left
             delta_rear    # Rear right
         ]
-        
+
         for (wx, wy), delta, v in zip(wheel_positions, steering_angles, wheel_velocities):
             # Transform wheel center position
             wheel_pos = np.dot([wx, wy], R.T) + [x, y]
-            
+
             # Create rotated wheel shape
             wheel_points = np.array([
                 [-wheel_length/2, -wheel_width/2],
@@ -637,18 +692,18 @@ class RobotVisualizer:
                 [wheel_length/2, wheel_width/2],
                 [-wheel_length/2, wheel_width/2]
             ])
-            
+
             # Apply steering angle
             c_wheel, s_wheel = np.cos(theta + delta), np.sin(theta + delta)
             R_wheel = np.array([[c_wheel, -s_wheel], [s_wheel, c_wheel]])
             wheel_points = np.dot(wheel_points, R_wheel.T) + wheel_pos
-            
+
             # Draw wheel
             wheel = Polygon(wheel_points, facecolor='blue' if v > 0 else 'red', 
                           alpha=0.5, edgecolor='black')
             cls.ax_plots['Map'].add_patch(wheel)
             cls.robot_patches.append(wheel)
-            
+
             # Add direction indicator on wheel
             indicator_length = wheel_length * 0.8
             indicator_start = wheel_pos
@@ -657,6 +712,150 @@ class RobotVisualizer:
                                                [indicator_start[1], indicator_end[1]], 
                                                'k-', linewidth=1)
             cls.robot_patches.append(indicator)
+
+        # Draw LIDAR beams if enabled in config
+        try:
+            show_lidar = False
+            lidar_params = {}
+            if hasattr(cls, 'config') and 'visualization' in cls.config:
+                vis_cfg = cls.config['visualization']
+                show_lidar = vis_cfg.get('show_lidar_beams', False)
+                lidar_params = vis_cfg.get('lidar_params', {})
+            # Also compute beams if any fuzzy plot is enabled
+            fuzzy_needed = any(p in getattr(cls, 'enabled_plots', []) for p in ['fuzzyFunctions', 'fuzzyMF', 'fuzzyPolar'])
+            compute_beams = show_lidar or fuzzy_needed
+            if compute_beams:
+                from src.models.Lidar import Lidar
+                num_beams = lidar_params.get('num_beams', 32)
+                max_range = lidar_params.get('max_range', 3.0)
+                fov = lidar_params.get('fov', np.pi*2)
+                hit_radius = lidar_params.get('obstacle_radius', None)
+                lidar = Lidar(num_beams=num_beams, max_range=max_range, fov=fov)
+
+                # Build obstacle list from scenario humans (circular obstacles)
+                obstacles = []
+                try:
+                    scenario_name = cls.simulation.scenario.scenario_name if hasattr(cls, 'simulation') else None
+                except Exception:
+                    scenario_name = None
+                sim_obj = getattr(cls, 'simulation', None)
+                # Fallback: use RobotVisualizer.config and last-known simulation if passed via update
+                # We don't have simulation object here directly, so derive from robot and global config if necessary
+                # Safest: try to access humans via cls.config if present
+                if hasattr(cls, 'current_simulation'):
+                    sim_obj = cls.current_simulation
+
+                # Prefer to pull from Visualization context where update_robot is called; attach last sim via class field
+                # Construct humans from the latest known scenario config stored in cls.config
+                human_positions = []
+                try:
+                    # When called from plot_results, cls.config is set and simulation object exists.
+                    # human_positions expected under config['scenario'][name]['humans']['positions']
+                    scenario_cfg = cls.config.get('scenario', {})
+                    scenario_name_cfg = scenario_cfg.get('name', None)
+                    if scenario_name_cfg and scenario_name_cfg in scenario_cfg:
+                        human_positions = scenario_cfg[scenario_name_cfg].get('humans', {}).get('positions', [])
+                except Exception:
+                    human_positions = []
+
+                # Convert to obstacles with a radius from safety config (rho_0 as conservative human radius)
+                default_r = cls.config.get('safety', {}).get('rho_0', 1.5)
+                if hit_radius is None:
+                    hit_radius = default_r
+                for pos in human_positions:
+                    if len(pos) >= 2:
+                        obstacles.append((float(pos[0]), float(pos[1]), float(hit_radius)))
+
+                # Cast rays
+                endpoints, distances, angles = lidar.cast_rays(x, y, theta, obstacles)
+                # Store last lidar for other plots
+                angles_rel = angles - theta  # relative
+                cls.last_lidar = {
+                    'angles_rad': angles_rel,
+                    'distances': distances,
+                    'max_range': max_range,
+                    'angles_abs': angles,
+                }
+                # Plot beams only if explicitly enabled
+                if show_lidar:
+                    beam_lines = []
+                    for end in endpoints:
+                        line, = cls.ax_plots['Map'].plot([x, end[0]], [y, end[1]], color='orange', alpha=0.5, linewidth=1)
+                        beam_lines.append(line)
+                    # Optionally draw hit points
+                    hit_pts = cls.ax_plots['Map'].scatter(endpoints[:, 0], endpoints[:, 1], c='orange', s=6, alpha=0.6)
+                    beam_lines.append(hit_pts)
+                    cls.robot_patches.extend(beam_lines)
+        except Exception as e:
+            import warnings
+            warnings.warn(f"LIDAR visualization failed: {e}")
+
+        # Render fuzzyPolar (subplot 221 equivalent)
+        if 'fuzzyPolar' in cls.enabled_plots and 'fuzzyPolar' in cls.ax_plots and hasattr(cls, 'last_lidar'):
+            axp = cls.ax_plots['fuzzyPolar']
+            # Clear previous artists safely
+            try:
+                axp.cla()
+            except Exception:
+                pass
+            from src.models.fuzzyFunctions import FuzzyFunctions, FuzzyParams
+            # Prepare data
+            angles_abs = cls.last_lidar['angles_abs']
+            distances = cls.last_lidar['distances']
+            max_range = cls.last_lidar['max_range']
+            # Compute fuzzy section values for polar overlay rings
+            fz = FuzzyFunctions(FuzzyParams())
+            # Goal direction from history desired position
+            if cls.history.get('x_d') and cls.history['x_d']:
+                x_d_last = cls.history['x_d'][-1]
+                y_d_last = cls.history['y_d'][-1]
+                goal_dir_deg_hist = np.rad2deg(np.arctan2(y_d_last - y, x_d_last - x) - theta)
+            else:
+                goal_dir_deg_hist = 0.0
+            out = fz.compute(cls.last_lidar['angles_rad'], distances, max_range, goal_dir_deg=goal_dir_deg_hist)
+            sec_deg = out['sec_deg']
+            sec_free_val = out['sec_free_val']
+            goal_dir_val = out['goal_dir_val']
+            # Plot section values and lidar envelope
+            axp.plot(np.deg2rad(np.r_[-180, sec_deg]), np.r_[sec_free_val[-1], sec_free_val], linewidth=2)
+            axp.plot(angles_abs, np.clip(distances / max_range, 0, 1), '--', linewidth=2)
+            axp.plot(np.deg2rad(np.r_[-180, sec_deg]), np.r_[goal_dir_val[-1], goal_dir_val], 'k', linewidth=2)
+            # Goal ray
+            goal_dir_deg = goal_dir_deg_hist
+            axp.plot([0, np.deg2rad(goal_dir_deg)], [0, min(1, np.mean(distances / max_range))], 'r', linewidth=2)
+            axp.set_title('Obs. and MFs (Polar)')
+
+        # Render fuzzyMF (subplot 222 equivalent)
+        if 'fuzzyMF' in cls.enabled_plots and 'fuzzyMF' in cls.ax_plots and hasattr(cls, 'last_lidar'):
+            axm = cls.ax_plots['fuzzyMF']
+            # Safe clear lines and legend
+            try:
+                for ln in list(axm.lines):
+                    ln.remove()
+                if getattr(axm, 'legend_', None) is not None:
+                    axm.legend_.remove()
+            except Exception:
+                pass
+            from src.models.fuzzyFunctions import FuzzyFunctions, FuzzyParams
+            angles_deg = np.rad2deg(cls.last_lidar['angles_rad'])
+            distances = cls.last_lidar['distances']
+            max_range = cls.last_lidar['max_range']
+            fz = FuzzyFunctions(FuzzyParams())
+            goal_dir_deg = goal_dir_deg_hist
+            out = fz.compute(cls.last_lidar['angles_rad'], distances, max_range, goal_dir_deg=goal_dir_deg)
+            sec_deg = out['sec_deg']
+            lidar_norm = out['lidar_norm']
+            sec_free_val = out['sec_free_val']
+            goal_dir_val = out['goal_dir_val']
+            # Plot goal direction and lidar area-like, section and goal-weighted curves
+            axm.plot([goal_dir_deg, goal_dir_deg], [0, 1], color='r', linewidth=2, marker='*')
+            axm.plot(angles_deg, lidar_norm, 'r--', linewidth=2)
+            axm.fill_between(angles_deg, 0, lidar_norm, color='b', alpha=0.15, edgecolor=(0,0,0,0))
+            axm.plot(np.r_[-180, sec_deg], np.r_[sec_free_val[-1], sec_free_val], color='b', linewidth=2)
+            axm.plot(np.r_[-180, sec_deg], np.r_[goal_dir_val[-1], goal_dir_val], 'k', linewidth=2)
+            axm.fill_between(np.r_[-180, sec_deg], 0, np.r_[goal_dir_val[-1], goal_dir_val], color='k', alpha=0.15, edgecolor=(0,0,0,0))
+            axm.set_xlim([-180, 180])
+            axm.set_ylim([0, 1.05])
     
     @classmethod
     def _update_human_visualization(cls, simulation):

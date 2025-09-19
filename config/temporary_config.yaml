@@ -3,15 +3,24 @@ timing:
   total_time: 10.5  # Total simulation time (s)
 visualization:
   enabled: true  # Enable visualization
+  show_trajectory: true  # Show trajectory in visualization
+  show_lidar_beams: true  # Show lidars in visualization
+  lidar_params:  # Parameters for LIDAR
+    num_beams: 120  # Increased from 16 for better resolution
+    max_range: 5.0  # Reduced from 10.0 for closer obstacle detection
+    fov: 6.28319  # Field of view in radians (2*pi for 360 degrees)
   plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
-    - State: true  # Robot Velocity State plot
+    - State: false  # Robot Velocity State plot
     - Velocity: true  # Speed and Angular Velocity plot
-    - Error: true  # Error plot
-    - SafetyViolation: true  # Safety violation plot
-    - ControlInput: true  # Control input plot
-
+    - Error: false  # Error plot
+    - SafetyViolation: false  # Safety violation plot
+    - ControlInput: false  # Control input plot
+    - fuzzyMF: false # subplot 222
+    - fuzzyPolar: true # subplot 221
+    - fuzzyFunctions: true # Fuzzy functions plot (subplot 212)
+    
 robot:
-  model: "dynamics"  # Type of simulation (kinematics, dynamics)
+  model: "kinematics"  # Type of simulation (kinematics, dynamics)
 controller:
   mode: "MCP"  
   type: "PID"  # Use the FastMPC, BiLVLMPC, SimplifiedMPC, PID controller

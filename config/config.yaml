@@ -25,6 +25,23 @@ logging:
 
 # Visualization Parameters
 visualization:
+  enabled: true  # Enable visualization
+  show_trajectory: true  # Show trajectory in visualization
+  show_lidar_beams: true  # Show lidars in visualization
+  lidar_params:  # Parameters for LIDAR
+    num_beams: 32  # Increased from 16 for better resolution
+    max_range: 3.0  # Reduced from 10.0 for closer obstacle detection
+    fov: 6.28319  # Field of view in radians (2*pi for 360 degrees)
+  plots:  # List of plots to visualize (State, Velocity, Error, SafetyViolation, ControlInput)
+    - State: false  # Robot Velocity State plot
+    - Velocity: false  # Speed and Angular Velocity plot
+    - Error: false  # Error plot
+    - SafetyViolation: false  # Safety violation plot
+    - ControlInput: false  # Control input plot
+    - fuzzyMF: true # subplot 222
+    - fuzzyPolar: true # subplot 221
+    - fuzzyFunctions: true # Fuzzy functions plot (subplot 212)
+    
   view_time_window: 10.0  # Time window for plots (s)
   plot_margin: 5  # Y-axis margin
   position_view_radius: 1.0  # XY plot radius (m)
